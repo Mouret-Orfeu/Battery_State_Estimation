@@ -39,10 +39,12 @@ void SocEkf_Init(Bms_EkfState_t    *ekf,
     ekf->x[1] = 0.0f;                       /* V_RC = 0 (assumed rest) */
 
     /* Initial covariance — high uncertainty if SoC not well known */
+    /* cross covariances are initially assumed to be zero */
     ekf->P[0][0] = 0.01f;  ekf->P[0][1] = 0.0f;
     ekf->P[1][0] = 0.0f;   ekf->P[1][1] = 0.01f;
 
     /* Process noise */
+    /* noise cross covariance is assumed zero (noise sources are assumed independent) */
     ekf->Q[0][0] = EKF_Q11; ekf->Q[0][1] = 0.0f;
     ekf->Q[1][0] = 0.0f;    ekf->Q[1][1] = EKF_Q22;
 
@@ -104,6 +106,8 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     float y_pred_mv   = ocv_pred_mv + x_pred[1] * 1000.0f + s_ecm.R0 * I * 1000.0f;
 
     /* Linearised output Jacobian C = [dOCV/dSoC, 1] (numeric dOCV/dSoC) */
+    /* Jacobian explanation: 
+    C = [∂V/∂SoC, ∂V/∂V_RC] = [dOCV/dSoC, 1] as ∂V/∂SoC = dOCV/dSoC and ∂V/∂V_RC = 1 */
     float dsoc       = 0.001f;
     float dOCV_dSoC  = (SocOcv_GetOcv((x_pred[0] + dsoc) * 100.0f) -
                         SocOcv_GetOcv((x_pred[0] - dsoc) * 100.0f)) / (2.0f * dsoc * 100.0f);
