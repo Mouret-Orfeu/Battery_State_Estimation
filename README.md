@@ -21,7 +21,7 @@ Accurate SoC estimation is one of the most safety-critical functions in an EV Ba
 ## File Structure
 
 ```
-bms-soc-estimation/
+Battery_State_Estimation/
 ├── include/
 │   ├── bms_types.h          # Cell parameters, SoC state struct, error codes
 │   ├── soc_coulomb.h        # Coulomb Counting API
@@ -38,9 +38,7 @@ bms-soc-estimation/
 ├── scripts/
 │   ├── simulate_cell.py     # Li-Ion cell simulator (generates test vectors)
 │   ├── plot_soc_compare.py  # Plots true vs. estimated SoC across methods
-│   └── ocv_table_gen.py     # Generates OCV lookup table from cell datasheet
-├── docs/
-│   └── ekf_derivation.md    # Mathematical derivation of EKF for ECM model
+│   └── ocv_table_gen.py     # Generates OCV lookup table from cell datasheet 
 ├── Makefile
 └── README.md
 ```
@@ -78,6 +76,7 @@ SoC(t) = SoC(t-1) - (I × Δt) / (3600 × Q_nom × η)
 - Integrates measured current at each sampling step
 - Applies Coulombic efficiency `η` during charge/discharge
 - Requires accurate initial SoC (uses OCV lookup at startup)
+- (Δt is in second and is divided by 3600 so the numerator is in A.h like Q_nom)
 
 ### 2. OCV Lookup (`soc_ocv.c`)
 
