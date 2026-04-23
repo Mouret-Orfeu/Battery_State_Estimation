@@ -1,23 +1,61 @@
-CC      = gcc
-CFLAGS  = -Wall -Wextra -std=c99 -Iinclude -g
+# Use 'make help' to see available targets.
 
-SRC     = src/soc_coulomb.c src/soc_ocv.c src/soc_ekf.c
-TEST_CC = test/test_coulomb.c $(SRC)
+CC      ?= gcc
+CFLAGS  ?= -Wall -Wextra -Werror -std=c99
+CFLAGS  += -Iinclude
+LDLIBS  ?= -lm
 
-.PHONY: all test simulate clean
+SRCDIR  = src
+TESTDIR = test
+OBJDIR  = obj
+BINDIR  = bin
+SCRIPTS = scripts
 
-all:
-	$(CC) $(CFLAGS) $(SRC) -o bms_soc_demo
+SOURCES := $(wildcard $(SRCDIR)/*.c)
+OBJECTS := $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-test: test_coulomb
+$(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
+	mkdir -p $(OBJDIR)
+	$(CC) -o $@ -c $< $(CFLAGS)
 
-test_coulomb:
-	$(CC) $(CFLAGS) $(TEST_CC) -o test_coulomb_out -lm
-	./test_coulomb_out
+.PHONY: clean help debug valgrind test_all test_coulomb simulate
+
+# Run all test suites — add new test_* targets here as dependencies
+test_all: test_coulomb
+
+test_coulomb: $(BINDIR)/test_coulomb_out
+	@echo "Running Coulomb counting tests..."
+	./$(BINDIR)/test_coulomb_out
+
+$(BINDIR)/test_coulomb_out: $(TESTDIR)/test_coulomb.c $(OBJECTS)
+	mkdir -p $(BINDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+	@echo "Coulomb counting test build complete!"
 
 simulate:
-	python3 scripts/simulate_cell.py --capacity 60 --duration 3600 --output docs/test_vectors.csv
+	python3 $(SCRIPTS)/simulate_cell.py --capacity 60 --duration 3600 --output docs/test_vectors.csv
 	@echo "Simulation complete — see docs/test_vectors.csv"
 
 clean:
-	rm -f bms_soc_demo test_coulomb_out *.o docs/test_vectors.csv
+	@echo "Cleaning up..."
+	rm -rf $(OBJDIR) $(BINDIR) docs/test_vectors.csv
+	@echo "Clean complete!"
+
+help:
+	@echo "Available targets:"
+	@echo "  make clean         - Remove all generated files"
+	@echo "  make debug         - Build and run all tests with debug flags"
+	@echo "  make valgrind      - Run all tests under Valgrind (memory check)"
+	@echo "  make test_all      - Build and run all test suites"
+	@echo "  make test_coulomb  - Build and run only the Coulomb counting tests"
+	@echo "  make simulate      - Run cell simulation script, generate current-SoC time series"
+	@echo "  make help          - Show this help message"
+
+debug: CFLAGS += -g -O0
+debug: $(BINDIR)/test_coulomb_out
+	gdb ./$(BINDIR)/test_coulomb_out
+
+valgrind: CFLAGS += -g -O0
+valgrind: $(BINDIR)/test_coulomb_out
+	@echo "Running Coulomb counting tests under Valgrind..."
+	valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all ./$(BINDIR)/test_coulomb_out
