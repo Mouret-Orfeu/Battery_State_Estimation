@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -Wall -Wextra -std=c99 -Iinclude -lm -g
+CFLAGS  = -Wall -Wextra -std=c99 -Iinclude -g
 
 SRC     = src/soc_coulomb.c src/soc_ocv.c src/soc_ekf.c
 TEST_CC = test/test_coulomb.c $(SRC)
@@ -12,7 +12,7 @@ all:
 test: test_coulomb
 
 test_coulomb:
-	$(CC) $(CFLAGS) $(TEST_CC) -o test_coulomb_out
+	$(CC) $(CFLAGS) $(TEST_CC) -o test_coulomb_out -lm
 	./test_coulomb_out
 
 simulate:
