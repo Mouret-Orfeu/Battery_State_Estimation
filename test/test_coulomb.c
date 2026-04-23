@@ -14,6 +14,8 @@ static int s_pass = 0, s_fail = 0;
 
 #define FLOAT_TOL 0.01f   /* 0.01% SoC tolerance */
 
+/* Assert that two floating-point values are near each other */
+/* The do-while loop ensures the define macro can be used as a single statement */
 #define ASSERT_FLOAT_NEAR(expected, actual, tol) \
     do { \
         float diff = (expected) - (actual); \
@@ -22,6 +24,7 @@ static int s_pass = 0, s_fail = 0;
         else { s_fail++; printf("  [FAIL] %s — expected %.4f got %.4f (line %d)\n", \
                __func__, (double)(expected), (double)(actual), __LINE__); } \
     } while(0)
+
 
 #define ASSERT_EQ(a, b) \
     do { if ((a)==(b)) { s_pass++; printf("  [PASS] %s\n", __func__); } \
