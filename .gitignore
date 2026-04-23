@@ -1,0 +1,12 @@
+# Compilation output
+obj/
+bin/
+
+# Object files
+*.o
+
+# Dependency files
+*.d
+
+# Generated test vectors
+docs/test_vectors.csv
