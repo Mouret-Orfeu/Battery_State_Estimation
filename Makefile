@@ -21,3 +21,5 @@ simulate:
 
 clean:
 	rm -f bms_soc_demo test_coulomb_out *.o docs/test_vectors.csv
+
+test
