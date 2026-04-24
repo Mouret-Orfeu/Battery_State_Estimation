@@ -9,27 +9,11 @@
 #include <math.h>
 #include "bms_types.h"
 #include "soc_coulomb.h"
+#include "test_helpers.h"
 
 static int s_pass = 0, s_fail = 0;
 
 #define FLOAT_TOL 0.01f   /* 0.01% SoC tolerance */
-
-/* Assert that two floating-point values are near each other */
-/* The do-while loop ensures the define macro can be used as a single statement */
-#define ASSERT_FLOAT_NEAR(expected, actual, tol) \
-    do { \
-        float diff = (expected) - (actual); \
-        if (diff < 0.0f) diff = -diff; \
-        if (diff <= (tol)) { s_pass++; printf("  [PASS] %s\n", __func__); } \
-        else { s_fail++; printf("  [FAIL] %s — expected %.4f got %.4f (line %d)\n", \
-               __func__, (double)(expected), (double)(actual), __LINE__); } \
-    } while(0)
-
-
-#define ASSERT_EQ(a, b) \
-    do { if ((a)==(b)) { s_pass++; printf("  [PASS] %s\n", __func__); } \
-         else { s_fail++; printf("  [FAIL] %s (line %d)\n", __func__, __LINE__); } \
-    } while(0)
 
 /* ---- Tests ---- */
 

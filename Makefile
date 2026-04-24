@@ -52,20 +52,25 @@ clean:
 
 help:
 	@echo "Available targets:"
-	@echo "  make clean         - Remove all generated files"
-	@echo "  make debug         - Build and run all tests with debug flags"
-	@echo "  make valgrind      - Run all tests under Valgrind (memory check)"
-	@echo "  make test_all      - Build and run all test suites"
-	@echo "  make test_coulomb  - Build and run only the Coulomb counting tests"
-	@echo "  make test_ekf      - Build and run only the EKF tests"
-	@echo "  make simulate      - Run cell simulation script, generate current-SoC time series"
-	@echo "  make help          - Show this help message"
+	@echo "  make clean                  - Remove all generated files"
+	@echo "  make debug                  - Build and run all tests with debug flags"
+	@echo "  make valgrind_test_coulomb  - Run Coulomb counting tests under Valgrind (memory check)"
+	@echo "  make valgrind_test_ekf      - Run EKF tests under Valgrind (memory check)"
+	@echo "  make test_all      	     - Build and run all test suites"
+	@echo "  make test_coulomb  		 - Build and run only the Coulomb counting tests"
+	@echo "  make test_ekf      	     - Build and run only the EKF tests"
+	@echo "  make simulate               - Run cell simulation, generate current-SoC time series"
+	@echo "  make help          		 - Show this help message"
 
 debug: CFLAGS += -g -O0
 debug: $(BINDIR)/test_coulomb_out
 	gdb ./$(BINDIR)/test_coulomb_out
 
 valgrind: CFLAGS += -g -O0
-valgrind: $(BINDIR)/test_coulomb_out
+valgrind_test_coulomb: $(BINDIR)/test_coulomb_out
 	@echo "Running Coulomb counting tests under Valgrind..."
 	valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all ./$(BINDIR)/test_coulomb_out
+
+valgrind_test_ekf: $(BINDIR)/test_ekf_out
+	@echo "Running EKF tests under Valgrind..."
+	valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all ./$(BINDIR)/test_ekf_out

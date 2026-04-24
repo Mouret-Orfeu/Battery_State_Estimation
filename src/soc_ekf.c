@@ -4,7 +4,7 @@
  *          State: x = [SoC, V_RC]  (1st order ECM / Randles model)
  *
  * State-space (discrete, Δt = 0.1 s):
- *   SoC(k)  = SoC(k-1)  − [I(k) × Δt] / [3600 × Q_nom × η]
+ *   SoC(k)  = SoC(k-1)  + [I(k) × Δt] / [3600 × Q_nom × η]   (positive I = charge)
  *   V_RC(k) = exp(−Δt/(R1×C1)) × V_RC(k-1) + R1×(1−exp(−Δt/(R1×C1))) × I(k)
  *
  * Measurement equation (terminal voltage):
@@ -81,7 +81,7 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     float tau   = s_ecm.R1 * s_ecm.C1;
     float A11   = 1.0f;
     float A22   = expf(-dt / tau);
-    float B1    = -(dt * eta) / (3600.0f * Q_nom);
+    float B1    = (dt * eta) / (3600.0f * Q_nom);
     float B2    = s_ecm.R1 * (1.0f - A22);
 
     /* ---- 1. Prediction Step ---- */
@@ -110,9 +110,9 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     C = [∂V/∂SoC, ∂V/∂V_RC] = [dOCV/dSoC, 1] as ∂V/∂SoC = dOCV/dSoC and ∂V/∂V_RC = 1 */
     float dsoc       = 0.001f;
     float dOCV_dSoC  = (SocOcv_GetOcv((x_pred[0] + dsoc) * 100.0f) -
-                        SocOcv_GetOcv((x_pred[0] - dsoc) * 100.0f)) / (2.0f * dsoc * 100.0f);
+                        SocOcv_GetOcv((x_pred[0] - dsoc) * 100.0f)) / (2.0f * dsoc);
 
-    float C0 = dOCV_dSoC;   /* Jacobian wrt SoC   */
+    float C0 = dOCV_dSoC;   /* Jacobian wrt x[0] (normalised [0,1]): dOCV_mV/d(x[0]) */
     float C1_j = 1000.0f;   /* Jacobian wrt V_RC (converting to mV) */
 
     /* Innovation covariance S = C·P_pred·Cᵀ + R */
