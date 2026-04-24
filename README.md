@@ -90,9 +90,9 @@ SoC(t) = SoC(t-1) - (I × Δt) / (3600 × Q_nom × η)
 ```
 State prediction:   x̂(k|k-1) = A·x̂(k-1|k-1) + B·u(k)
 Covariance predict: P(k|k-1) = A·P(k-1)·Aᵀ + Q
-Kalman gain:        K = P(k|k-1)·Cᵀ·(C·P(k|k-1)·Cᵀ + R)⁻¹
+Kalman gain:        K = P(k|k-1)·Hᵀ·(H·P(k|k-1)·Hᵀ + R)⁻¹
 State update:       x̂(k|k) = x̂(k|k-1) + K·(y(k) − ŷ(k))
-Covariance update:  P(k|k) = (I − K·C)·P(k|k-1)
+Covariance update:  P(k|k) = (I − K·H)·P(k|k-1)
 ```
 
 ---

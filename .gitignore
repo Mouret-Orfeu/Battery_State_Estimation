@@ -8,5 +8,8 @@ bin/
 # Dependency files
 *.d
 
+# venv
+.venv/
+
 # Generated test vectors
 docs/test_vectors.csv

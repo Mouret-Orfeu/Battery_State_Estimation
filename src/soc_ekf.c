@@ -105,25 +105,25 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     float ocv_pred_mv = SocOcv_GetOcv(x_pred[0] * 100.0f);
     float y_pred_mv   = ocv_pred_mv + x_pred[1] * 1000.0f + s_ecm.R0 * I * 1000.0f;
 
-    /* Linearised output Jacobian C = [dOCV/dSoC, 1] (numeric dOCV/dSoC) */
-    /* Jacobian explanation: 
-    C = [∂V/∂SoC, ∂V/∂V_RC] = [dOCV/dSoC, 1] as ∂V/∂SoC = dOCV/dSoC and ∂V/∂V_RC = 1 */
+    /* Linearised output Jacobian H = [dOCV/dSoC, 1] (numeric dOCV/dSoC) */
+    /* Jacobian explanation:
+    H = [∂V/∂SoC, ∂V/∂V_RC] = [dOCV/dSoC, 1] as ∂V/∂SoC = dOCV/dSoC and ∂V/∂V_RC = 1 */
     float dsoc       = 0.001f;
     float dOCV_dSoC  = (SocOcv_GetOcv((x_pred[0] + dsoc) * 100.0f) -
                         SocOcv_GetOcv((x_pred[0] - dsoc) * 100.0f)) / (2.0f * dsoc);
 
-    float C0 = dOCV_dSoC;   /* Jacobian wrt x[0] (normalised [0,1]): dOCV_mV/d(x[0]) */
-    float C1_j = 1000.0f;   /* Jacobian wrt V_RC (converting to mV) */
+    float H0 = dOCV_dSoC;   /* Jacobian wrt x[0] (normalised [0,1]): dOCV_mV/d(x[0]) */
+    float H1 = 1000.0f;     /* Jacobian wrt V_RC (converting to mV) */
 
-    /* Innovation covariance S = C·P_pred·Cᵀ + R */
-    float S = C0*C0 * P_pred[0][0]
-            + C0*C1_j * (P_pred[0][1] + P_pred[1][0])
-            + C1_j*C1_j * P_pred[1][1]
+    /* Innovation covariance S = H·P_pred·Hᵀ + R */
+    float S = H0*H0 * P_pred[0][0]
+            + H0*H1 * (P_pred[0][1] + P_pred[1][0])
+            + H1*H1 * P_pred[1][1]
             + ekf->R * 1e6f;  /* R in mV² */
 
-    /* Kalman gain K = P_pred·Cᵀ / S */
-    float K0 = (C0 * P_pred[0][0] + C1_j * P_pred[0][1]) / S;
-    float K1 = (C0 * P_pred[1][0] + C1_j * P_pred[1][1]) / S;
+    /* Kalman gain K = P_pred·Hᵀ / S */
+    float K0 = (H0 * P_pred[0][0] + H1 * P_pred[0][1]) / S;
+    float K1 = (H0 * P_pred[1][0] + H1 * P_pred[1][1]) / S;
 
     /* State update */
     float innovation = v_meas_mv - y_pred_mv;
@@ -134,11 +134,11 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     if (ekf->x[0] < 0.0f) ekf->x[0] = 0.0f;
     if (ekf->x[0] > 1.0f) ekf->x[0] = 1.0f;
 
-    /* Covariance update: P = (I - K·C)·P_pred */
-    ekf->P[0][0] = (1.0f - K0*C0) * P_pred[0][0] - K0*C1_j * P_pred[1][0];
-    ekf->P[0][1] = (1.0f - K0*C0) * P_pred[0][1] - K0*C1_j * P_pred[1][1];
-    ekf->P[1][0] = -K1*C0 * P_pred[0][0] + (1.0f - K1*C1_j) * P_pred[1][0];
-    ekf->P[1][1] = -K1*C0 * P_pred[0][1] + (1.0f - K1*C1_j) * P_pred[1][1];
+    /* Covariance update: P = (I - K·H)·P_pred */
+    ekf->P[0][0] = (1.0f - K0*H0) * P_pred[0][0] - K0*H1 * P_pred[1][0];
+    ekf->P[0][1] = (1.0f - K0*H0) * P_pred[0][1] - K0*H1 * P_pred[1][1];
+    ekf->P[1][0] = -K1*H0 * P_pred[0][0] + (1.0f - K1*H1) * P_pred[1][0];
+    ekf->P[1][1] = -K1*H0 * P_pred[0][1] + (1.0f - K1*H1) * P_pred[1][1];
 
     /* Write result to SoC state */
     state->soc_prev_pct = state->soc_pct;
