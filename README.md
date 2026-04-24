@@ -24,6 +24,7 @@ Accurate SoC estimation is one of the most safety-critical functions in an EV Ba
 Battery_State_Estimation/
 ├── include/
 │   ├── bms_types.h          # Cell parameters, SoC state struct, error codes
+|   ├── test_helpers.h       # Some common macros for the test scripts
 │   ├── soc_coulomb.h        # Coulomb Counting API
 │   ├── soc_ocv.h            # OCV Lookup Table API
 │   └── soc_ekf.h            # Extended Kalman Filter API
@@ -37,8 +38,7 @@ Battery_State_Estimation/
 │   └── test_ekf.c           # Unit tests: EKF convergence from initial error
 ├── scripts/
 │   ├── simulate_cell.py     # Li-Ion cell simulator (generates test vectors)
-│   ├── plot_soc_compare.py  # Plots true vs. estimated SoC across methods
-│   └── ocv_table_gen.py     # Generates OCV lookup table from cell datasheet 
+│   └── plot_soc_compare.py  # Plots true vs. estimated SoC across methods  
 ├── Makefile
 └── README.md
 ```
