@@ -5,9 +5,12 @@ Generates a synthetic current profile (drive cycle or recharge) and the
 resulting true SoC trajectory via ECM simulation.
 
 Usage:
-    python3 scripts/simulate_cell.py --capacity 60 --duration 3600 --output test_vectors.csv
-    python3 scripts/simulate_cell.py --profile cc_cv --initial-soc 20 --duration 7200 --output charge.csv
-    python3 scripts/simulate_cell.py --profile constant --initial-soc 20 --duration 3600 --output charge.csv
+    python3 scripts/simulate_cell.py --capacity 60 --duration 3600
+    python3 scripts/simulate_cell.py --profile cc_cv --initial-soc 20 --duration 7200
+    python3 scripts/simulate_cell.py --profile constant --initial-soc 20 --duration 3600
+
+Output is always saved to docs/simulated_cell_behavior/simulated_cell_behavior_i.csv,
+where i follows the highest existing index in that folder.
 
 Outputs a CSV with columns:
     time_s, current_a, voltage_mv, true_soc_pct
@@ -19,11 +22,36 @@ import argparse
 import math
 import csv
 import random
+import re
+import pathlib
+import matplotlib.pyplot as plt
+
+_BASE_DIR  = pathlib.Path(__file__).resolve().parent.parent / "docs" / "simulated_cell_behavior"
+CSV_DIR    = _BASE_DIR / "csv"
+PLOTS_DIR  = _BASE_DIR / "plots"
+
+
+def _next_output_paths() -> tuple[pathlib.Path, pathlib.Path]:
+    CSV_DIR.mkdir(parents=True, exist_ok=True)
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    pattern = re.compile(r'^simulated_cell_behavior_(\d+)\.csv$')
+    max_idx = -1
+    for f in CSV_DIR.iterdir():
+        m = pattern.match(f.name)
+        if m:
+            max_idx = max(max_idx, int(m.group(1)))
+    idx = max_idx + 1
+    csv_path  = CSV_DIR   / f"simulated_cell_behavior_{idx}.csv"
+    plot_path = PLOTS_DIR / f"simulated_cell_behavior_plot_{idx}.png"
+    return csv_path, plot_path
 
 # ---- ECM Parameters (NMC, 25°C) ----
 R0 = 0.005   # Ohmic resistance [Ω]
 R1 = 0.008   # RC resistance [Ω]
 C1 = 1500.0  # RC capacitance [F]
+
+# ---- Cell Parameters (must match bms_types.h / soc_ekf.c) ----
+BMS_CELL_CAPACITY_AH = 60.0
 
 # ---- OCV Table (0–100%, 5% steps) ----
 OCV_TABLE_MV = [
@@ -57,7 +85,7 @@ def _apply_slew(current: float, target: float, max_delta: float) -> float:
 
 # ---- Current profile generators ----
 
-def generate_drive_cycle(duration_s: int, dt: float = 0.1) -> list:
+def generate_discharge_cycle(duration_s: int, dt: float = 0.1) -> list:
     """
     Generate a synthetic WLTP-inspired current profile.
     Positive = charge (regen), Negative = discharge (driving).
@@ -111,7 +139,7 @@ def generate_charge_cycle(
     I_cutoff: float = 3.0,
     soc_cv_pct: float = 80.0,
     initial_soc_pct: float = 20.0,
-    capacity_ah: float = 60.0,
+    capacity_ah: float = BMS_CELL_CAPACITY_AH,
     slew_rate: float = 5.0,
     tau_cv: float = 600.0,
 ) -> list:
@@ -184,7 +212,7 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
              profile_mode: str = 'drive', **charge_kwargs):
     """Run full ECM simulation and return list of records."""
     if profile_mode == 'drive':
-        profile = generate_drive_cycle(duration_s, dt)
+        profile = generate_discharge_cycle(duration_s, dt)
     else:
         profile = generate_charge_cycle(
             duration_s, dt,
@@ -233,14 +261,12 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
 
 def main():
     parser = argparse.ArgumentParser(description='Li-Ion Cell Simulator')
-    parser.add_argument('--capacity',    type=float, default=60.0,
+    parser.add_argument('--capacity',    type=float, default=BMS_CELL_CAPACITY_AH,
                         help='Nominal capacity [Ah]')
     parser.add_argument('--duration',    type=int,   default=3600,
                         help='Simulation duration [s]')
     parser.add_argument('--initial-soc', type=float, default=90.0,
                         help='Initial SoC [%%]')
-    parser.add_argument('--output',      type=str,   default='test_vectors.csv',
-                        help='Output CSV file')
     parser.add_argument('--seed',        type=int,   default=42,
                         help='Random seed for reproducibility')
     parser.add_argument('--profile',     type=str,   default='drive',
@@ -262,8 +288,12 @@ def main():
     args = parser.parse_args()
     random.seed(args.seed)
 
+    output_path, plot_path = _next_output_paths()
+
     print(f"[INFO] Profile={args.profile} | Duration={args.duration}s | "
           f"Capacity={args.capacity}Ah | InitialSoC={args.initial_soc}%")
+
+    # ---- Simulation (cell behaviour curve generation) ----
 
     records = simulate(
         args.capacity, args.duration, args.initial_soc,
@@ -275,18 +305,49 @@ def main():
         slew_rate=args.slew_rate,
     )
 
-    with open(args.output, 'w', newline='') as f:
+    # ---- Output CSV generation ----
+
+    with open(output_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['time_s', 'current_a', 'voltage_mv', 'true_soc_pct'])
         writer.writeheader()
         writer.writerows(records)
 
-    print(f"[INFO] Written {len(records)} samples → {args.output}")
+    print(f"[INFO] Written {len(records)} samples → {output_path}")
     final_soc = records[-1]['true_soc_pct']
     delta_soc = final_soc - args.initial_soc
     sign      = '+' if delta_soc >= 0 else ''
     print(f"[INFO] Final SoC: {final_soc:.2f}%  |  "
           f"ΔSoC: {sign}{delta_soc:.2f}%  |  "
           f"Energy: {abs(delta_soc) / 100.0 * args.capacity:.2f} Ah")
+
+    # ---- Plot ----
+
+    time     = [r['time_s']       for r in records]
+    current  = [r['current_a']    for r in records]
+    voltage  = [r['voltage_mv']   for r in records]
+    soc_hist = [r['true_soc_pct'] for r in records]
+
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+    fig.suptitle(f"Simulated cell behaviour — {output_path.stem}", fontsize=11)
+
+    axes[0].plot(time, current, linewidth=0.8)
+    axes[0].set_ylabel("Current (A)")
+    axes[0].axhline(0, color='k', linewidth=0.4, linestyle='--')
+    axes[0].grid(True, linewidth=0.3)
+
+    axes[1].plot(time, voltage, color='tab:orange', linewidth=0.8)
+    axes[1].set_ylabel("Voltage (mV)")
+    axes[1].grid(True, linewidth=0.3)
+
+    axes[2].plot(time, soc_hist, color='tab:green', linewidth=0.8)
+    axes[2].set_ylabel("True SoC (%)")
+    axes[2].set_xlabel("Time (s)")
+    axes[2].grid(True, linewidth=0.3)
+
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=150)
+    print(f"[INFO] Plot saved → {plot_path}")
+    plt.show()
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
  * @file    test_ekf.c
  * @brief   Unit tests for Extended Kalman Filter SoC estimator
  *
- * @author  Kamal Kadakara
+ * @author  Orfeu Mouret
  */
 
 #include <stdio.h>

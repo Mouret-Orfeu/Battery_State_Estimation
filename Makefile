@@ -51,12 +51,12 @@ $(BINDIR)/test_ocv_out: $(TESTDIR)/test_ocv.c $(OBJECTS)
 	@echo "OCV lookup test build complete!"
 
 simulate:
-	python3 $(SCRIPTS)/simulate_cell.py --capacity 60 --duration 3600 --output docs/test_vectors.csv
-	@echo "Simulation complete — see docs/test_vectors.csv"
+	python3 $(SCRIPTS)/simulate_cell.py --capacity 60 --duration 3600 --output docs/simulated_cell_behavior.csv
+	@echo "Simulation complete — see docs/simulated_cell_behavior.csv"
 
 clean:
 	@echo "Cleaning up..."
-	rm -rf $(OBJDIR) $(BINDIR) docs/test_vectors.csv
+	rm -rf $(OBJDIR) $(BINDIR) docs/simulated_cell_behavior.csv
 	@echo "Clean complete!"
 
 help:

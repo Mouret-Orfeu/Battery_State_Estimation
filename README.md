@@ -101,10 +101,10 @@ Covariance update:  P(k|k) = (I − K·H)·P(k|k-1)
 
 ```bash
 # Generate simulated drive cycle current profile + true SoC
-python3 scripts/simulate_cell.py --capacity 60 --duration 3600 --output test_vectors.csv
+python3 scripts/simulate_cell.py --capacity 60 --duration 3600 --output simulated_cell_behavior.csv
 
 # Compare all three estimators against true SoC
-python3 scripts/plot_soc_compare.py --input test_vectors.csv
+python3 scripts/plot_soc_compare.py --input simulated_cell_behavior.csv
 ```
 
 Output: comparison plot saved to `docs/soc_comparison.png`

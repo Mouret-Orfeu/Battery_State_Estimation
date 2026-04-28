@@ -12,4 +12,4 @@ bin/
 .venv/
 
 # Generated test vectors
-docs/test_vectors.csv
+docs/simulated_cell_behavior.csv

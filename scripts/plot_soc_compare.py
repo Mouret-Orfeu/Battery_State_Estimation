@@ -6,7 +6,7 @@ Runs Coulomb Counting, OCV Lookup, and EKF against the ground-truth SoC
 produced by simulate_cell.py and saves a three-panel comparison figure.
 
 Usage:
-    python3 scripts/plot_soc_compare.py --input docs/test_vectors.csv
+    python3 scripts/plot_soc_compare.py --input docs/simulated_cell_behavior.csv
 
 Output: docs/soc_comparison.png  (configurable with --output)
 
@@ -167,7 +167,7 @@ def rmse(errors: list) -> float:
 
 def main():
     parser = argparse.ArgumentParser(description='SoC Estimator Comparison Plot')
-    parser.add_argument('--input',  type=str, default='docs/test_vectors.csv',
+    parser.add_argument('--input',  type=str, default='docs/simulated_cell_behavior.csv',
                         help='Input CSV produced by simulate_cell.py')
     parser.add_argument('--output', type=str, default='docs/soc_comparison.png',
                         help='Output plot file')
