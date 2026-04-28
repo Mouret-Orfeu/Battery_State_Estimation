@@ -11,5 +11,5 @@ bin/
 # venv
 .venv/
 
-# Generated test vectors
-docs/simulated_cell_behavior.csv
+# Simulation csv files
+docs/simulated_cell_behavior/csv
