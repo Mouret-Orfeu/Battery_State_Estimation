@@ -15,7 +15,7 @@ where i follows the highest existing index in that folder.
 Outputs a CSV with columns:
     time_s, current_a, voltage_mv, true_soc_pct
 
-Author: Kamal Kadakara
+Author: Kamal Kadakara and Orfeu Mouret
 """
 
 import argparse
@@ -403,7 +403,7 @@ def main():
 
     # ---- Plot ----
 
-    time     = [r['time_s']       for r in records]
+    time     = [r['time_s'] / 60.0 for r in records] # Convert time to minutes for plotting
     current  = [r['current_a']    for r in records]
     voltage  = [r['voltage_mv']   for r in records]
     soc_hist = [r['true_soc_pct'] for r in records]
@@ -422,7 +422,7 @@ def main():
 
     axes[2].plot(time, soc_hist, color='tab:green', linewidth=0.8)
     axes[2].set_ylabel("True SoC (%)")
-    axes[2].set_xlabel("Time (s)")
+    axes[2].set_xlabel("Time (min)")
     axes[2].grid(True, linewidth=0.3)
 
     plt.tight_layout()

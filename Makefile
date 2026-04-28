@@ -9,6 +9,7 @@ SRCDIR  = src
 TESTDIR = test
 OBJDIR  = obj
 BINDIR  = bin
+LIBDIR  = lib
 SCRIPTS = scripts
 
 SOURCES := $(wildcard $(SRCDIR)/*.c)
@@ -18,7 +19,7 @@ $(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
 	mkdir -p $(OBJDIR)
 	$(CC) -o $@ -c $< $(CFLAGS)
 
-.PHONY: clean help debug valgrind test_all test_coulomb test_ekf test_ocv simulate
+.PHONY: clean help debug valgrind test_all test_coulomb test_ekf test_ocv simulate lib
 
 # Run all test suites — add new test_* targets here as dependencies
 test_all: test_coulomb test_ekf test_ocv
@@ -50,13 +51,18 @@ $(BINDIR)/test_ocv_out: $(TESTDIR)/test_ocv.c $(OBJECTS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 	@echo "OCV lookup test build complete!"
 
+lib:
+	mkdir -p $(LIBDIR)
+	$(CC) $(CFLAGS) -fPIC -shared -o $(LIBDIR)/libbms.so $(SOURCES) $(LDLIBS)
+	@echo "Shared library built → $(LIBDIR)/libbms.so"
+
 simulate:
 	python3 $(SCRIPTS)/simulate_cell.py --capacity 60 --duration 3600 --output docs/simulated_cell_behavior.csv
 	@echo "Simulation complete — see docs/simulated_cell_behavior.csv"
 
 clean:
 	@echo "Cleaning up..."
-	rm -rf $(OBJDIR) $(BINDIR) docs/simulated_cell_behavior.csv
+	rm -rf $(OBJDIR) $(BINDIR) $(LIBDIR)
 	@echo "Clean complete!"
 
 help:

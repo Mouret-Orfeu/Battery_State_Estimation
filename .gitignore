@@ -13,3 +13,9 @@ bin/
 
 # Simulation csv files
 docs/simulated_cell_behavior/csv
+
+# Python cache
+__pycache__/
+
+# Library build artifacts
+lib/
