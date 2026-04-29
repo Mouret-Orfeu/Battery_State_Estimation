@@ -41,14 +41,6 @@ static const float s_ocv_table_mv[21] = {
 #define OCV_TABLE_ENTRIES   21U
 #define OCV_SOC_STEP_PCT    5.0f
 
-/**
- * @brief  Estimate SoC from OCV via linear interpolation.
- *         Only valid when cell is at electrochemical equilibrium (≥2h rest).
- *
- * @param  ocv_mv   Measured open-circuit voltage [mV]
- * @param  soc_out  Output SoC estimate [0.0–100.0 %]
- * @return BMS_OK on success; BMS_ERR_VOLTAGE_OOT if OCV is out of table range
- */
 Bms_Error_t SocOcv_LookupSoc(float ocv_mv, float *soc_out)
 {
     if (soc_out == NULL) return BMS_ERR_NOT_INITIALISED;
@@ -77,11 +69,6 @@ Bms_Error_t SocOcv_LookupSoc(float ocv_mv, float *soc_out)
     return BMS_ERR_VOLTAGE_OOT;
 }
 
-/**
- * @brief  Get OCV for a given SoC (inverse lookup, for EKF output equation).
- * @param  soc_pct  SoC percentage [0.0–100.0]
- * @return OCV in millivolts
- */
 float SocOcv_GetOcv(float soc_pct)
 {
     if (soc_pct <= 0.0f)   return s_ocv_table_mv[0];

@@ -15,6 +15,7 @@ Accurate SoC estimation is one of the most safety-critical functions in an EV Ba
 | Coulomb Counting  | Integrate current × time  | Simple, low CPU                     | Drifts with sensor error    |
 | OCV Lookup        | Voltage → SoC table       | No drift, accurate at rest          | Only valid at equilibrium   |
 | Extended Kalman Filter (EKF) | State estimation | Best accuracy, handles noise | Higher complexity          |
+| SoH (capacity-fade) | Qmax from charge windows | Tracks ageing, no extra sensor   | Needs large ΔSoC windows    |
 
 ---
 
@@ -24,21 +25,28 @@ Accurate SoC estimation is one of the most safety-critical functions in an EV Ba
 Battery_State_Estimation/
 ├── include/
 │   ├── bms_types.h          # Cell parameters, SoC state struct, error codes
-|   ├── test_helpers.h       # Some common macros for the test scripts
+│   ├── test_helpers.h       # Some common macros for the test scripts
 │   ├── soc_coulomb.h        # Coulomb Counting API
 │   ├── soc_ocv.h            # OCV Lookup Table API
-│   └── soc_ekf.h            # Extended Kalman Filter API
+│   ├── soc_ekf.h            # Extended Kalman Filter API
+│   └── soh.h                # State-of-Health estimator API
 ├── src/
 │   ├── soc_coulomb.c        # Coulomb Counting implementation
 │   ├── soc_ocv.c            # OCV table interpolation
-│   └── soc_ekf.c            # EKF state estimator (1st order ECM model)
+│   ├── soc_ekf.c            # EKF state estimator (1st order ECM model)
+│   └── soh.c                # SoH estimator (capacity-fade method)
 ├── test/
 │   ├── test_coulomb.c       # Unit tests: current integration accuracy
 │   ├── test_ocv.c           # Unit tests: OCV table boundary & interpolation
-│   └── test_ekf.c           # Unit tests: EKF convergence from initial error
+│   ├── test_ekf.c           # Unit tests: EKF convergence from initial error
+│   └── test_soh.c           # Unit tests: SoH computation
 ├── scripts/
 │   ├── simulate_cell.py     # Li-Ion cell simulator (generates test vectors)
-│   └── plot_soc_compare.py  # Plots true vs. estimated SoC across methods  
+│   └── plot_soc_compare.py  # Plots true vs. estimated SoC across methods
+├── docs/
+│   └── simulated_cell_behavior/
+│       ├── csv/             # Simulation CSVs (simulate_cell.py output)
+│       └── plots/           # Simulation plots (simulate_cell.py output)
 ├── Makefile
 └── README.md
 ```
@@ -94,6 +102,20 @@ Kalman gain:        K = P(k|k-1)·Hᵀ·(H·P(k|k-1)·Hᵀ + R)⁻¹
 State update:       x̂(k|k) = x̂(k|k-1) + K·(y(k) − ŷ(k))
 Covariance update:  P(k|k) = (I − K·H)·P(k|k-1)
 ```
+
+### 4. State-of-Health — capacity-fade method (`soh.c`)
+
+```
+SoH [%] = ( Qmax_current / Qmax_nom ) × 100
+
+Qmax_current = |η × ∫ I dt| / ( ΔSoC / 100 )
+```
+
+- Detects rest periods where `|I| < 0.5 A` for ≥ 2 hours
+- At each confirmed rest, reads equilibrium SoC via OCV lookup
+- Integrates charge (with coulombic efficiency) between consecutive rests
+- An update is only accepted when `ΔSoC ≥ 80 %` across the active window
+- All thresholds are compile-time constants at the top of `soh.h`
 
 ---
 

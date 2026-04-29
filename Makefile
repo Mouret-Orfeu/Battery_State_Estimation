@@ -19,10 +19,10 @@ $(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
 	mkdir -p $(OBJDIR)
 	$(CC) -o $@ -c $< $(CFLAGS)
 
-.PHONY: clean help debug valgrind test_all test_coulomb test_ekf test_ocv simulate lib
+.PHONY: clean help debug valgrind test_all test_coulomb test_ekf test_ocv test_soh simulate lib valgrind_test_coulomb valgrind_test_ekf valgrind_test_ocv valgrind_test_soh
 
 # Run all test suites — add new test_* targets here as dependencies
-test_all: test_coulomb test_ekf test_ocv
+test_all: test_coulomb test_ekf test_ocv test_soh
 
 test_coulomb: $(BINDIR)/test_coulomb_out
 	@echo "Running Coulomb counting tests..."
@@ -51,6 +51,15 @@ $(BINDIR)/test_ocv_out: $(TESTDIR)/test_ocv.c $(OBJECTS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 	@echo "OCV lookup test build complete!"
 
+test_soh: $(BINDIR)/test_soh_out
+	@echo "Running SoH estimator tests..."
+	./$(BINDIR)/test_soh_out
+
+$(BINDIR)/test_soh_out: $(TESTDIR)/test_soh.c $(OBJECTS)
+	mkdir -p $(BINDIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+	@echo "SoH estimator test build complete!"
+
 lib:
 	mkdir -p $(LIBDIR)
 	$(CC) $(CFLAGS) -fPIC -shared -o $(LIBDIR)/libbms.so $(SOURCES) $(LDLIBS)
@@ -69,13 +78,15 @@ help:
 	@echo "Available targets:"
 	@echo "  make clean                  - Remove all generated files"
 	@echo "  make debug                  - Build and run all tests with debug flags"
-	@echo "  make valgrind_test_coulomb  - Run Coulomb counting tests under Valgrind (memory check)"
-	@echo "  make valgrind_test_ekf      - Run EKF tests under Valgrind (memory check)"
-	@echo "  make valgrind_test_ocv      - Run OCV lookup tests under Valgrind (memory check)"
 	@echo "  make test_all      	     - Build and run all test suites"
 	@echo "  make test_coulomb  		 - Build and run only the Coulomb counting tests"
 	@echo "  make test_ekf      	     - Build and run only the EKF tests"
 	@echo "  make test_ocv      	     - Build and run only the OCV lookup tests"
+	@echo "  make test_soh      	     - Build and run only the SoH estimator tests"
+	@echo "  make valgrind_test_coulomb  - Run Coulomb counting tests under Valgrind (memory check)"
+	@echo "  make valgrind_test_ekf      - Run EKF tests under Valgrind (memory check)"
+	@echo "  make valgrind_test_ocv      - Run OCV lookup tests under Valgrind (memory check)"
+	@echo "  make valgrind_test_soh      - Run SoH estimator tests under Valgrind (memory check)"
 	@echo "  make simulate               - Run cell simulation, generate current-SoC time series"
 	@echo "  make help          		 - Show this help message"
 
@@ -83,7 +94,7 @@ debug: CFLAGS += -g -O0
 debug: $(BINDIR)/test_coulomb_out
 	gdb ./$(BINDIR)/test_coulomb_out
 
-valgrind_test_coulomb valgrind_test_ekf valgrind_test_ocv: CFLAGS += -g -O0
+valgrind_test_coulomb valgrind_test_ekf valgrind_test_ocv valgrind_test_soh: CFLAGS += -g -O0
 
 valgrind_test_coulomb: $(BINDIR)/test_coulomb_out
 	@echo "Running Coulomb counting tests under Valgrind..."
@@ -96,3 +107,7 @@ valgrind_test_ekf: $(BINDIR)/test_ekf_out
 valgrind_test_ocv: $(BINDIR)/test_ocv_out
 	@echo "Running OCV lookup tests under Valgrind..."
 	valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all ./$(BINDIR)/test_ocv_out
+
+valgrind_test_soh: $(BINDIR)/test_soh_out
+	@echo "Running SoH estimator tests under Valgrind..."
+	valgrind --leak-check=full --track-origins=yes --show-leak-kinds=all ./$(BINDIR)/test_soh_out

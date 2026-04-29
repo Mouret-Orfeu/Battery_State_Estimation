@@ -22,13 +22,6 @@ void SocCoulomb_Init(Bms_SocState_t *state, float initial_soc_pct)
     state->is_initialised = true;
 }
 
-/**
- * @brief  Update SoC via Coulomb Counting.
- *
- * @param  state      Pointer to SoC state structure
- * @param  current_a  Measured pack current [A] (positive = charge)
- * @param  dt_s       Elapsed time since last call [seconds]
- */
 Bms_Error_t SocCoulomb_Update(Bms_SocState_t *state,
                               float           current_a,
                               float           dt_s)
@@ -42,7 +35,7 @@ Bms_Error_t SocCoulomb_Update(Bms_SocState_t *state,
 
     /* Coulomb Counting integration */
     float delta_soc = (current_a * dt_s * eta) /
-                      (3600.0f * BMS_CELL_CAPACITY_AH) * 100.0f;
+                      (3600.0f * BMS_CELL_CAPACITY_INI_AH) * 100.0f;
 
     state->soc_prev_pct = state->soc_pct;
     state->soc_pct     += delta_soc;

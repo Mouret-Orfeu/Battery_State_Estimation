@@ -74,7 +74,7 @@ R1 = 0.008   # RC resistance [Ω]
 C1 = 1500.0  # RC capacitance [F]
 
 # ---- Cell Parameters (must match bms_types.h / soc_ekf.c) ----
-BMS_CELL_CAPACITY_AH = 60.0
+BMS_CELL_CAPACITY_INI_AH = 60.0
 
 # ---- OCV Table (0–100%, 5% steps) ----
 OCV_TABLE_MV = [
@@ -318,7 +318,7 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
 
 def main():
     parser = argparse.ArgumentParser(description='Li-Ion Cell Simulator')
-    parser.add_argument('--capacity',    type=float, default=BMS_CELL_CAPACITY_AH,
+    parser.add_argument('--capacity',    type=float, default=BMS_CELL_CAPACITY_INI_AH,
                         help='Nominal capacity [Ah]')
     parser.add_argument('--duration',    type=int,   default=DEFAULT_SIMULATION_DURATION_S,
                         help='Simulation duration [s]')

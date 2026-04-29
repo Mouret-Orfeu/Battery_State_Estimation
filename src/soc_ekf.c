@@ -55,15 +55,6 @@ void SocEkf_Init(Bms_EkfState_t    *ekf,
     state->is_initialised = true;
 }
 
-/**
- * @brief  One EKF prediction + update step.
- *
- * @param  ekf        EKF state
- * @param  state      SoC output state (updated with new estimate)
- * @param  current_a  Pack current [A] (positive = charge)
- * @param  v_meas_mv  Measured terminal voltage [mV]
- * @param  dt_s       Time step [s]
- */
 Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
                            Bms_SocState_t *state,
                            float           current_a,
@@ -74,7 +65,7 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
 
     float I  = current_a;
     float dt = dt_s;
-    float Q_nom = BMS_CELL_CAPACITY_AH;
+    float Q_nom = BMS_CELL_CAPACITY_INI_AH;
     float eta   = (I >= 0.0f) ? BMS_COULOMBIC_EFF_CHG : BMS_COULOMBIC_EFF_DCHG;
 
     /* ECM time constant */
