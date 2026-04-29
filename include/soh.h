@@ -30,7 +30,7 @@
  * ========================================================= */
 
 /** Minimum consecutive duration with |I| < threshold to declare rest [s] */
-#define SOH_MIN_REST_DURATION_S         7200.0f   /* 2 h */
+#define SOH_MIN_REST_DURATION_S         1800   /* 7200.0f for 2 h */
 
 /** Current magnitude below which the cell is considered at rest [A] */
 #define SOH_REST_CURRENT_THRESHOLD_A    0.5f
