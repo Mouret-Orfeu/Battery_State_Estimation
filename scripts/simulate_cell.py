@@ -110,44 +110,63 @@ def _apply_slew(current: float, target: float, max_delta: float) -> float:
 
 # This function was designed for EV-like behavior, thus the states "accelerate, regen" etc
 # As I don't want regen behavior in my case, I put regen weight to 0 here
-def generate_discharge_cycle(duration_s: int, dt: float = 0.1) -> list:
+def generate_discharge_cycle(
+    duration_s: int,
+    dt: float = 0.1,
+    discharge_slew_rate: float = DISCHARGE_MAX_SLEW,
+    state_duration_min_s: float = 30.0,
+    state_duration_max_s: float = 300.0,
+    discharge_state_weights: list = None,
+    idle_current: float = -2.0,
+    accelerate_current_min: float = -80.0,
+    accelerate_current_max: float = -40.0,
+    cruise_current_min: float = -30.0,
+    cruise_current_max: float = -15.0,
+    decelerate_current_min: float = -15.0,
+    decelerate_current_max: float = -5.0,
+    regen_current_min: float = 10.0,
+    regen_current_max: float = 40.0,
+) -> list:
     """
     Generate a synthetic WLTP-inspired current profile.
     Positive = charge (regen), Negative = discharge (driving).
     """
+    if discharge_state_weights is None:
+        discharge_state_weights = DISCHARGE_STATE_WEIGHTS
+
     steps = int(duration_s / dt)
     profile = []
     t = 0.0
 
     state = 'cruise'
     state_timer = 0.0
-    current = -10.0     # Start with mild discharge
-    max_slew = DISCHARGE_MAX_SLEW * dt
+    current = (cruise_current_min + cruise_current_max) / 2.0
+    max_slew = discharge_slew_rate * dt
 
     for _ in range(steps):
         state_timer += dt
 
         # State transitions
-        if state_timer > DEFAULT_DISCHARGE_STATE_DURATION_DISTRIB():
+        if state_timer > random.uniform(state_duration_min_s, state_duration_max_s):
             state = random.choices(
                 ['cruise', 'accelerate', 'decelerate', 'regen', 'idle'],
-                weights= DISCHARGE_STATE_WEIGHTS
+                weights=discharge_state_weights,
             )[0]
             state_timer = 0.0
 
         # Current target per state
         if state == 'idle':
-            target_current = -2.0
+            target_current = idle_current
         elif state == 'accelerate':
-            target_current = random.uniform(-80.0, -40.0)
+            target_current = random.uniform(accelerate_current_min, accelerate_current_max)
         elif state == 'cruise':
-            target_current = random.uniform(-30.0, -15.0)
+            target_current = random.uniform(cruise_current_min, cruise_current_max)
         elif state == 'decelerate':
-            target_current = random.uniform(-15.0, -5.0)
+            target_current = random.uniform(decelerate_current_min, decelerate_current_max)
         elif state == 'regen':
-            target_current = random.uniform(10.0, 40.0)
+            target_current = random.uniform(regen_current_min, regen_current_max)
         else:
-            target_current = -10.0
+            target_current = idle_current
 
         current = _apply_slew(current, target_current, max_slew)
         profile.append((round(t, 2), round(current, 2)))
@@ -193,6 +212,8 @@ def generate_mixed_cycles(
     rest_duration_std_s: float = DEFAULT_MIXED_REST_DURATION_STD_S,
     # Which phase starts the sequence
     first_phase: str = DEFAULT_MIXED_FIRST_PHASE,
+    # Discharge cycle distribution parameters (forwarded to generate_discharge_cycle)
+    **discharge_kwargs,
 ) -> list:
     """
     Concatenate alternating discharge and charge sub-cycles separated by rest
@@ -215,7 +236,7 @@ def generate_mixed_cycles(
         if phase == 'discharge':
             raw_duration = random.gauss(discharge_duration_mean_s, discharge_duration_std_s)
             duration_s   = int(max(MIN_SUB_DURATION_S, min(remaining, raw_duration)))
-            sub_cycle     = generate_discharge_cycle(duration_s, dt)
+            sub_cycle     = generate_discharge_cycle(duration_s, dt, **discharge_kwargs)
         else:
             raw_duration = random.gauss(charge_duration_mean_s, charge_duration_std_s)
             duration_s   = int(max(MIN_SUB_DURATION_S, min(remaining, raw_duration)))
@@ -269,13 +290,22 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
         'charge_duration_mean_s', 'charge_duration_std_s',
         'rest_duration_mean_s', 'rest_duration_std_s', 'first_phase',
     }
-    mixed_kwargs  = {k: v for k, v in charge_kwargs.items() if k in _MIXED_KEYS}
-    charge_kwargs = {k: v for k, v in charge_kwargs.items() if k not in _MIXED_KEYS}
+    _DISCHARGE_KEYS = {
+        'discharge_slew_rate', 'state_duration_min_s', 'state_duration_max_s',
+        'discharge_state_weights', 'idle_current',
+        'accelerate_current_min', 'accelerate_current_max',
+        'cruise_current_min', 'cruise_current_max',
+        'decelerate_current_min', 'decelerate_current_max',
+        'regen_current_min', 'regen_current_max',
+    }
+    mixed_kwargs     = {k: v for k, v in charge_kwargs.items() if k in _MIXED_KEYS}
+    discharge_kwargs = {k: v for k, v in charge_kwargs.items() if k in _DISCHARGE_KEYS}
+    charge_kwargs    = {k: v for k, v in charge_kwargs.items() if k not in _MIXED_KEYS and k not in _DISCHARGE_KEYS}
 
     if profile_mode == 'discharge':
-        profile = generate_discharge_cycle(duration_s, dt)
+        profile = generate_discharge_cycle(duration_s, dt, **discharge_kwargs)
     elif profile_mode == 'mixed':
-        profile = generate_mixed_cycles(duration_s, dt, **mixed_kwargs, **charge_kwargs)
+        profile = generate_mixed_cycles(duration_s, dt, **mixed_kwargs, **charge_kwargs, **discharge_kwargs)
     else:  # CC charge
         profile = generate_charge_cycle(duration_s, dt, **charge_kwargs)
 
@@ -336,6 +366,36 @@ def main():
     parser.add_argument('--slew-rate',      type=float, default=CHARGE_MAX_SLEW,
                         help='Charge current ramp rate [A/s]')
 
+    # Discharge-specific arguments (used when --profile is discharge or mixed)
+    parser.add_argument('--discharge-slew-rate',          type=float, default=DISCHARGE_MAX_SLEW,
+                        help='Discharge current ramp rate [A/s]')
+    parser.add_argument('--discharge-state-duration-min', type=float, default=30.0,
+                        help='Min duration of each discharge state [s]')
+    parser.add_argument('--discharge-state-duration-max', type=float, default=300.0,
+                        help='Max duration of each discharge state [s]')
+    parser.add_argument('--discharge-state-weights',      type=float, nargs=5,
+                        default=DISCHARGE_STATE_WEIGHTS,
+                        metavar=('CRUISE', 'ACCEL', 'DECEL', 'REGEN', 'IDLE'),
+                        help='Relative weights for discharge states [cruise accel decel regen idle]')
+    parser.add_argument('--discharge-idle-current',       type=float, default=-2.0,
+                        help='Target current in idle state [A]')
+    parser.add_argument('--discharge-accelerate-min',     type=float, default=-80.0,
+                        help='Min current in accelerate state [A]')
+    parser.add_argument('--discharge-accelerate-max',     type=float, default=-40.0,
+                        help='Max current in accelerate state [A]')
+    parser.add_argument('--discharge-cruise-min',         type=float, default=-30.0,
+                        help='Min current in cruise state [A]')
+    parser.add_argument('--discharge-cruise-max',         type=float, default=-15.0,
+                        help='Max current in cruise state [A]')
+    parser.add_argument('--discharge-decelerate-min',     type=float, default=-15.0,
+                        help='Min current in decelerate state [A]')
+    parser.add_argument('--discharge-decelerate-max',     type=float, default=-5.0,
+                        help='Max current in decelerate state [A]')
+    parser.add_argument('--discharge-regen-min',          type=float, default=10.0,
+                        help='Min current in regen state [A]')
+    parser.add_argument('--discharge-regen-max',          type=float, default=40.0,
+                        help='Max current in regen state [A]')
+
     # Mixed-profile arguments (used when --profile is mixed)
     parser.add_argument('--discharge-duration-mean', type=float,
                         default=DEFAULT_MIXED_DISCHARGE_DURATION_MEAN_S,
@@ -384,6 +444,20 @@ def main():
         rest_duration_mean_s=args.rest_duration_mean,
         rest_duration_std_s=args.rest_duration_std,
         first_phase=args.first_phase,
+        # discharge distribution params (discharge and mixed)
+        discharge_slew_rate=args.discharge_slew_rate,
+        state_duration_min_s=args.discharge_state_duration_min,
+        state_duration_max_s=args.discharge_state_duration_max,
+        discharge_state_weights=args.discharge_state_weights,
+        idle_current=args.discharge_idle_current,
+        accelerate_current_min=args.discharge_accelerate_min,
+        accelerate_current_max=args.discharge_accelerate_max,
+        cruise_current_min=args.discharge_cruise_min,
+        cruise_current_max=args.discharge_cruise_max,
+        decelerate_current_min=args.discharge_decelerate_min,
+        decelerate_current_max=args.discharge_decelerate_max,
+        regen_current_min=args.discharge_regen_min,
+        regen_current_max=args.discharge_regen_max,
     )
 
     # ---- Output CSV generation ----

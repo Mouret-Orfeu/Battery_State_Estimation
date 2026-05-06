@@ -19,3 +19,6 @@ __pycache__/
 
 # Library build artifacts
 lib/
+
+# data
+data/datasets/
