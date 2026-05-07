@@ -22,3 +22,5 @@ lib/
 
 # data
 data/datasets/
+docs/real_cell_behavior/csv
+docs/simulated_cell_behavior/csv

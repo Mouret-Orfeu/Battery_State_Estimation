@@ -18,7 +18,8 @@
 #define BMS_CELL_VOLTAGE_MIN_MV     3000U   /* 3.0 V — deep discharge limit   */
 #define BMS_CELL_VOLTAGE_MAX_MV     4200U   /* 4.2 V — full charge limit       */
 #define BMS_CELL_VOLTAGE_NOM_MV     3700U   /* 3.7 V — nominal                 */
-#define BMS_CELL_CAPACITY_INI_AH        60.0f   /* Ah — nominal capacity           */
+// #define BMS_CELL_CAPACITY_INI_AH        60.0f   /* Ah — nominal capacity (from former project)         */
+#define BMS_CELL_CAPACITY_INI_AH        3.4f   /* Ah — nominal capacity for dataset UL-PUR         */
 #define BMS_COULOMBIC_EFF_CHG       0.999f  /* Charge efficiency               */
 #define BMS_COULOMBIC_EFF_DCHG      1.000f  /* Discharge efficiency            */
 #define BMS_SAMPLE_TIME_S           0.1f    /* 100 ms sampling interval        */
