@@ -10,6 +10,17 @@
 #include "bms_types.h"
 
 /**
+ * @brief  Load the OCV–SoC lookup table from a CSV file (soc,ocv_mv columns).
+ *         Rows whose SoC aligns with OCV_SOC_STEP_PCT intervals are extracted;
+ *         returns BMS_ERR_INVALID_PARAM if the matched count != OCV_TABLE_ENTRIES,
+ *         the file cannot be opened, or any row cannot be parsed.
+ *
+ * @param  csv_path  Path to the processed CSV (e.g. OCV_SOC_NCA_1_processed.csv)
+ * @return BMS_OK on success; BMS_ERR_INVALID_PARAM on any failure
+ */
+Bms_Error_t SocOcv_LoadTableFromCsv(const char *csv_path);
+
+/**
  * @brief  Estimate SoC from OCV via linear interpolation.
  *         Only valid when the cell is at electrochemical equilibrium (≥ 2 h rest).
  *

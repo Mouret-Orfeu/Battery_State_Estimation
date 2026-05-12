@@ -1,45 +1,94 @@
 /**
  * @file    soc_ocv.c
  * @brief   OCV (Open Circuit Voltage) Lookup Table SoC estimator
- *          NMC cell OCV–SoC table, 21 points, 0–100% in 5% steps
  *          Linear interpolation between entries.
  *
- * @author  Kamal Kadakara
+ * @author  Kamal Kadakara and Orfeu Mouret
  */
 
 #include "soc_ocv.h"
 #include <stddef.h>
+#include <stdio.h>
+#include <math.h>
+
+#define OCV_TABLE_ENTRIES   101U
+#define OCV_SOC_STEP_PCT    1.0f
 
 /* ---- NMC OCV Table (measured at 25°C, 1C current, after 2h rest) ----
  * Index 0 = 0% SoC (3000 mV), Index 20 = 100% SoC (4200 mV)
  * Values in millivolts.
  */
-static const float s_ocv_table_mv[21] = {
-    3000.0f,  /* 0%  */
-    3100.0f,  /* 5%  */
-    3250.0f,  /* 10% */
-    3350.0f,  /* 15% */
-    3420.0f,  /* 20% */
-    3470.0f,  /* 25% */
-    3520.0f,  /* 30% */
-    3560.0f,  /* 35% */
-    3600.0f,  /* 40% */
-    3630.0f,  /* 45% */
-    3660.0f,  /* 50% */
-    3690.0f,  /* 55% */
-    3720.0f,  /* 60% */
-    3760.0f,  /* 65% */
-    3800.0f,  /* 70% */
-    3850.0f,  /* 75% */
-    3920.0f,  /* 80% */
-    4010.0f,  /* 85% */
-    4080.0f,  /* 90% */
-    4150.0f,  /* 95% */
-    4200.0f,  /* 100% */
-};
+/* static const float s_ocv_table_mv[21] = { */
+/*     3000.0f,  /\* 0%  *\/ */
+/*     3100.0f,  /\* 5%  *\/ */
+/*     3250.0f,  /\* 10% *\/ */
+/*     3350.0f,  /\* 15% *\/ */
+/*     3420.0f,  /\* 20% *\/ */
+/*     3470.0f,  /\* 25% *\/ */
+/*     3520.0f,  /\* 30% *\/ */
+/*     3560.0f,  /\* 35% *\/ */
+/*     3600.0f,  /\* 40% *\/ */
+/*     3630.0f,  /\* 45% *\/ */
+/*     3660.0f,  /\* 50% *\/ */
+/*     3690.0f,  /\* 55% *\/ */
+/*     3720.0f,  /\* 60% *\/ */
+/*     3760.0f,  /\* 65% *\/ */
+/*     3800.0f,  /\* 70% *\/ */
+/*     3850.0f,  /\* 75% *\/ */
+/*     3920.0f,  /\* 80% *\/ */
+/*     4010.0f,  /\* 85% *\/ */
+/*     4080.0f,  /\* 90% *\/ */
+/*     4150.0f,  /\* 95% *\/ */
+/*     4200.0f,  /\* 100% *\/ */
+/* }; */
 
-#define OCV_TABLE_ENTRIES   21U
-#define OCV_SOC_STEP_PCT    5.0f
+/* ---- OCV Table — populated at runtime via SocOcv_LoadTableFromCsv() ----
+ * Index 0 = 0% SoC, Index 20 = 100% SoC. Values in millivolts.
+ */
+static float s_ocv_table_mv[OCV_TABLE_ENTRIES];
+
+Bms_Error_t SocOcv_LoadTableFromCsv(const char *csv_path)
+{
+    if (csv_path == NULL) return BMS_ERR_INVALID_PARAM;
+
+    FILE *fp = fopen(csv_path, "r");
+    if (fp == NULL) return BMS_ERR_INVALID_PARAM;
+
+    char line[64];
+    /* Skip header row (soc,ocv_mv) */
+    if (fgets(line, sizeof(line), fp) == NULL) {
+        fclose(fp);
+        return BMS_ERR_INVALID_PARAM;
+    }
+
+    uint32_t idx = 0U;
+    float soc, ocv_mv;
+
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        if (sscanf(line, "%f,%f", &soc, &ocv_mv) != 2) continue;
+
+        /* Only pick rows whose SoC aligns with OCV_SOC_STEP_PCT spacing */
+        float expected_soc = ((float)idx * OCV_SOC_STEP_PCT) / 100.0f;
+
+        /* Small errors (~2 ULP) allowed due to sscanf lack of arithmetic guarantee across platforms. */
+        if (fabsf(soc - expected_soc) > 2e-7f) continue;
+
+        if (idx >= OCV_TABLE_ENTRIES) {
+            fclose(fp);
+            return BMS_ERR_INVALID_PARAM;
+        }
+
+        s_ocv_table_mv[idx] = ocv_mv;
+        idx++;
+    }
+
+    fclose(fp);
+
+    /* OCV_TABLE_ENTRIES / OCV_SOC_STEP_PCT do not match the CSV data */
+    if (idx != OCV_TABLE_ENTRIES) return BMS_ERR_INVALID_PARAM;
+
+    return BMS_OK;
+}
 
 Bms_Error_t SocOcv_LookupSoc(float ocv_mv, float *soc_out)
 {

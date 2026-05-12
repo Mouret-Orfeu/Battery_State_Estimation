@@ -72,6 +72,7 @@ typedef enum {
     BMS_ERR_SOC_DIVERGED       = 0x04U,  /* EKF/CC divergence detected  */
     BMS_ERR_NOT_INITIALISED    = 0x08U,  /* SoC not bootstrapped        */
     BMS_ERR_TEMP_OOT           = 0x10U,  /* Temperature out of range    */
+    BMS_ERR_INVALID_PARAM      = 0x20U,  /* Invalid argument or file data */
 } Bms_Error_t;
 
 #endif /* BMS_TYPES_H */
