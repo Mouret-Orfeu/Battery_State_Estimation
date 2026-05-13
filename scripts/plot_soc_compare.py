@@ -3,14 +3,18 @@
 plot_soc_compare.py — SoC Estimator Comparison Plot
 
 Calls the actual C implementations (src/soc_coulomb.c, src/soc_ocv.c,
-src/soc_ekf.c) via the shared library built with 'make lib'.
+src/soc_ekf.c) via the shared library built with 'make lib',
+and produces a plot comparing their SoC estimates against the true SoC (if available)
+and the current profile.
 
 Usage:
     make lib
     python3 scripts/plot_soc_compare.py \
         --input <path_to_cell_behavior_format_csv>
 
-Output: docs/soc_comparison.png  (configurable with --output)
+Output: 
+    a PNG plot saved to docs/simulated_cell_behavior/plots/soc_plots/
+    or docs/real_cell_behavior/plots/soc_plots/ depending on the input path.
 
 Author: Orfeu Mouret
 """
@@ -26,19 +30,15 @@ import subprocess
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
-try:
-    from plotly.subplots import make_subplots
-    import plotly.graph_objects as go
-    _PLOTLY_AVAILABLE = True
-except ImportError:
-    _PLOTLY_AVAILABLE = False
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
-# ---- Paths ----
+# ---- Useful project paths ----
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _LIB_PATH  = _REPO_ROOT / 'lib' / 'libbms.so'
 
 
-# ---- ctypes struct definitions (must match bms_types.h exactly) ----
+# ---- ctypes struct definitions for C function execution (must match bms_types.h exactly) ----
 
 class BmsEcmParams(ctypes.Structure):
     _fields_ = [
@@ -68,47 +68,58 @@ class BmsEkfState(ctypes.Structure):
 
 # ---- Library loader ----
 
-# It loads the shared library, and tells Python the C function signatures
+# Loads the shared library, and tells Python the C function signatures
 def _load_lib() -> ctypes.CDLL:
-    """Build lib/libbms.so if missing, then load and annotate it."""
+    """
+    Build lib/libbms.so if missing, then load and annotate it.
+
+    Once loaded, lib = ctypes.CDLL("libbms.so") gives a lib object where 
+    each C function in the library becomes a callable attribute, 
+    e.g. lib.SocEkf_Update(...). That's why argtypes/restype is then declare on each one, so Python 
+    knows how to convert arguments and return values correctly when crossing the Python/C boundary.
+    """
     if not _LIB_PATH.exists():
         print('[INFO] lib/libbms.so not found — running "make lib"...')
         subprocess.run(['make', 'lib'], cwd=str(_REPO_ROOT), check=True)
 
     lib = ctypes.CDLL(str(_LIB_PATH))
+    
+    # argtypes/restype must be declared explicitly: without them ctypes defaults all arguments to 
+    # c_int and return values to c_int, silently corrupting floats and pointers.
 
+    # C to python setup for Coulomb counting
     lib.SocCoulomb_Init.argtypes  = [ctypes.POINTER(BmsSocState), ctypes.c_float]
     lib.SocCoulomb_Init.restype   = None
-
     lib.SocCoulomb_Update.argtypes = [ctypes.POINTER(BmsSocState),
-                                      ctypes.c_float, ctypes.c_float]
+                                      ctypes.c_float, ctypes.c_float]  # current_a, dt_s
     lib.SocCoulomb_Update.restype  = ctypes.c_uint
 
+    # C to python setup for OCV lookup
     lib.SocOcv_LoadTableFromCsv.argtypes = [ctypes.c_char_p]
     lib.SocOcv_LoadTableFromCsv.restype  = ctypes.c_uint
-
     lib.SocOcv_LookupSoc.argtypes = [ctypes.c_float,
-                                      ctypes.POINTER(ctypes.c_float)]
+                                      ctypes.POINTER(ctypes.c_float)]  # voltage_mv → soc via output pointer
     lib.SocOcv_LookupSoc.restype  = ctypes.c_uint
-
-    lib.SocOcv_GetOcv.argtypes = [ctypes.c_float]
+    lib.SocOcv_GetOcv.argtypes = [ctypes.c_float]                      # soc → ocv_mv
     lib.SocOcv_GetOcv.restype  = ctypes.c_float
 
+    # C to python setup for EKF
     lib.SocEkf_Init.argtypes = [ctypes.POINTER(BmsEkfState),
                                  ctypes.POINTER(BmsSocState),
                                  ctypes.POINTER(BmsEcmParams),
-                                 ctypes.c_float]
+                                 ctypes.c_float]                        # initial_soc_pct
     lib.SocEkf_Init.restype  = None
-
     lib.SocEkf_Update.argtypes = [ctypes.POINTER(BmsEkfState),
                                    ctypes.POINTER(BmsSocState),
-                                   ctypes.c_float, ctypes.c_float, ctypes.c_float]
+                                   ctypes.c_float, ctypes.c_float, ctypes.c_float]  # current_a, voltage_mv, dt_s
     lib.SocEkf_Update.restype  = ctypes.c_uint
 
     return lib
 
 
-# ---- Estimator wrappers — call the actual C implementations ----
+# ---- Estimator wrappers — call the actual C functions on whole cycling time-series ----
+
+# See the C code for the details of how the called functions work
 
 def run_coulomb(lib: ctypes.CDLL, records: list,
                 initial_soc_pct: float, dts: list) -> list:
@@ -155,7 +166,10 @@ def run_ekf(lib: ctypes.CDLL, records: list,
 def load_csv(path: str) -> list:
     with open(path, newline='') as f:
         reader = csv.DictReader(f)
+
+        # Check if the 'true_soc_pct' column is present in csv
         has_true_soc = 'true_soc_pct' in reader.fieldnames
+
         records = []
         for row in reader:
             r = {
@@ -163,6 +177,7 @@ def load_csv(path: str) -> list:
                 'current_a':  float(row['current_a']),
                 'voltage_mv': float(row['voltage_mv']),
             }
+            # If ground truth soc is available, include it in the record to plot and compute errors
             if has_true_soc:
                 r['true_soc_pct'] = float(row['true_soc_pct'])
             records.append(r)
@@ -176,20 +191,26 @@ def rmse(errors: list) -> float:
 # ---- Main ----
 
 def main():
+
+    # ---- Setup ----
+
     parser = argparse.ArgumentParser(description='SoC Estimator Comparison Plot')
     parser.add_argument(
         '--input', type=str,
         default='docs/simulated_cell_behavior/csv/simulated_cell_behavior_0.csv',
-        help='Input CSV produced by simulate_cell.py',
+        help='Input CSV produced by simulate_cell.py path',
     )
     parser.add_argument(
         '--output', type=str, default=None,
-        help='Output plot file (auto-detected from input path if omitted)',
+        help='Output plot file path + name (auto-detected from input path if omitted)',
     )
     parser.add_argument(
         '--interactive', action='store_true',
         help='Save an interactive HTML plot (Plotly) alongside the static PNG.',
     )
+
+    # Initial SoC can be provided via command line, 
+    # if not, OCV-SoC lookup on the first voltage will be used to choose it.
     parser.add_argument(
         '--soc0', type=float, default=None, metavar='PCT',
         help='Initial SoC in %% (0–100). If omitted, initialised via OCV lookup on the first sample.',
@@ -197,6 +218,7 @@ def main():
     _default_ocv_table = str(
         _REPO_ROOT / 'data' / 'OCV_SoC' / 'OCV_SOC_NCA_1_folder' / 'OCV_SOC_NCA_1_processed.csv'
     )
+
     parser.add_argument(
         '--ocv-table', type=str, default=_default_ocv_table, metavar='CSV',
         help='OCV–SoC lookup table CSV (soc,ocv_mv columns). '
@@ -207,6 +229,7 @@ def main():
     if args.soc0 is not None and not (0.0 <= args.soc0 <= 100.0):
         parser.error(f'--soc0 must be between 0 and 100, got {args.soc0}')
 
+    # Auto output file naming process
     if args.output is None:
         input_path = pathlib.Path(args.input).resolve()
         stem = input_path.stem
@@ -221,6 +244,8 @@ def main():
     lib = _load_lib()
 
     ret = lib.SocOcv_LoadTableFromCsv(args.ocv_table.encode())
+
+    # Here, ret is a status code returned by the C function: 0 for success, non-zero for failure.
     if ret != 0:
         raise RuntimeError(
             f'SocOcv_LoadTableFromCsv failed (err={ret}) for "{args.ocv_table}". '
@@ -255,6 +280,8 @@ def main():
         info += f"  |  True initial SoC: {true_soc[0]:.2f}%"
     print(info)
 
+    # ---- SoC Estimation ----
+
     soc_cc  = run_coulomb(lib, records, soc0, dts)
     soc_ocv = run_ocv(lib, records)
     soc_ekf = run_ekf(lib, records, soc0, dts)
@@ -278,7 +305,7 @@ def main():
         ax_cur = fig.add_subplot(gs[1], sharex=ax_soc)
         ax_err = None
 
-    # Marker stride: one marker every ~2 % of the time axis, staggered per curve
+    # Setup of the marker stride: one marker every ~2 % of the time axis, staggered per curve
     _n = len(t)
     _ms = max(1, _n // 50)
     _me_ocv = (0,          _ms)
@@ -339,18 +366,14 @@ def main():
         print("[INFO] No true_soc_pct column — RMSE not computed")
 
     if args.interactive:
-        if not _PLOTLY_AVAILABLE:
-            print("[WARN] plotly not installed — skipping interactive plot. "
-                  "Run: pip install plotly")
-        else:
-            _save_interactive(
-                args, t, soc_ocv, soc_cc, soc_ekf,
-                true_soc if has_true_soc else None,
-                err_ocv if has_true_soc else None,
-                err_cc  if has_true_soc else None,
-                err_ekf if has_true_soc else None,
-                current,
-            )
+        _save_interactive(
+            args, t, soc_ocv, soc_cc, soc_ekf,
+            true_soc if has_true_soc else None,
+            err_ocv if has_true_soc else None,
+            err_cc  if has_true_soc else None,
+            err_ekf if has_true_soc else None,
+            current,
+        )
 
 
 def _save_interactive(args, t, soc_ocv, soc_cc, soc_ekf,
