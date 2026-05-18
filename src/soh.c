@@ -4,16 +4,16 @@
  *
  * Phase state machine:
  *
- *   SEEKING_REST ──► AT_REST ◄──────────────────────────────┐
+ *   SEEKING_REST ──► AT_REST ◄────────────────────────────── ┐
  *                       │                                    │
- *                       │ |I| ≥ threshold                    │ rest confirmed
+ *                       │ |I| ≥ SOH_REST_CURRENT_THRESHOLD_A │ rest confirmed
  *                       ▼                                    │
  *                    ACTIVE ─────────────────────────────────┘
  *
  *   SEEKING_REST : waiting for the first confirmed rest; no integral yet.
  *   AT_REST      : resting; no charge integration.
  *   ACTIVE       : integrating charge (η × I × dt).  When the next rest is
- *                  confirmed, Qmax and SoH are computed if ΔSoC ≥ minimum.
+ *                  confirmed, Qmax and SoH are computed if ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.
  *
  * Rest confirmation fires on the exact step where rest_timer first reaches
  * SOH_MIN_REST_DURATION_S (edge detection, not level detection).
@@ -140,6 +140,19 @@ float Soh_Get(const Soh_State_t *soh_state)
     return soh_state->soh_pct;
 }
 
+
+/**
+ * @brief  Test function: Compute SoH estimates from a full time series.
+ *
+ * @param  current_a       Array of current samples [A] (positive = charge)
+ * @param  voltage_mv      Array of voltage samples [mV]
+ * @param  n_samples       Number of samples in input arrays
+ * @param  dt_s            Time step duration [s]
+ * @param  out_times_s     Output array for timestamps of SoH updates [s]
+ * @param  out_soh_pct     Output array for SoH estimates [%]
+ * @param  max_updates     Maximum number of SoH updates to produce (size of output arrays)
+ * @return Number of SoH updates produced, or 0 on invalid input
+ */
 uint32_t Soh_ComputeFromTimeSeries(
     const float *current_a,
     const float *voltage_mv,

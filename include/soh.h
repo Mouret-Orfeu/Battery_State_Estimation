@@ -33,7 +33,7 @@
 #define SOH_MIN_REST_DURATION_S         1800   /* 7200.0f for 2 h */
 
 /** Current magnitude below which the cell is considered at rest [A] */
-#define SOH_REST_CURRENT_THRESHOLD_A    0.5f
+#define SOH_REST_CURRENT_THRESHOLD_A    0.05f
 
 /** Minimum ΔSoC across an active window required for a valid Qmax update [%] */
 #define SOH_MIN_DELTA_SOC_PCT           80.0f

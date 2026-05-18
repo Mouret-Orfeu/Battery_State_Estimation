@@ -17,7 +17,7 @@
  * @param  state            Pointer to SoC state structure
  * @param  initial_soc_pct  Starting SoC [0.0–100.0 %]
  */
-void      SocCoulomb_Init(Bms_SocState_t *state, float initial_soc_pct);
+void SocCoulomb_Init(Bms_SocState_t *state, float initial_soc_pct);
 
 /**
  * @brief  Update SoC via Coulomb Counting.

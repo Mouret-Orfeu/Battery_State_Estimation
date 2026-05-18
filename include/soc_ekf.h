@@ -19,7 +19,7 @@
  * @param  ecm_params       ECM parameters (R0, R1, C1) for this cell
  * @param  initial_soc_pct  Starting SoC estimate [0.0–100.0 %]
  */
-void        SocEkf_Init(Bms_EkfState_t *ekf,
+void SocEkf_Init(Bms_EkfState_t *ekf,
                         Bms_SocState_t *state,
                         const Bms_EcmParams_t *ecm_params,
                         float initial_soc_pct);
