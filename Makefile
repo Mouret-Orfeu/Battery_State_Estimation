@@ -1,4 +1,5 @@
 # Use 'make help' to see available targets.
+# test sync shared repo
 
 CC      ?= gcc
 CFLAGS  ?= -Wall -Wextra -Werror -std=c99
