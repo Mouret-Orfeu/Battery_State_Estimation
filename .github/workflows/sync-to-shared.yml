@@ -1,0 +1,36 @@
+name: Sync to shared repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout my repo
+        uses: actions/checkout@v4
+        with:
+          path: my-repo
+
+      - name: Checkout shared repo
+        uses: actions/checkout@v4
+        with:
+          repository: movntec/lrcs_shared
+          token: ${{ secrets.SHARED_REPO_TOKEN }}
+          path: shared-repo
+
+      - name: Copy files into subfolder
+        run: |
+          mkdir -p shared-repo/Battery_State_Estimation
+          rsync -av --delete my-repo/ shared-repo/Battery_State_Estimation/ --exclude='.git'
+
+      - name: Commit and push
+        working-directory: shared-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Battery_State_Estimation
+          git diff --cached --quiet || git commit -m "sync: update Battery_State_Estimation from Battery_State_Estimation"
+          git push origin main
