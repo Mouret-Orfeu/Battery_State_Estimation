@@ -20,9 +20,11 @@
 #define BMS_CELL_VOLTAGE_NOM_MV     3700U   /* 3.7 V — nominal                 */
 // #define BMS_CELL_CAPACITY_INI_AH        60.0f   /* Ah — nominal capacity (from former project)         */
 #define BMS_CELL_CAPACITY_INI_AH        3.4f   /* Ah — nominal capacity for dataset UL-PUR         */
+/* Coulombic efficiencies — reference values only.  The BMS applies η itself
+ * when it integrates the cell current, so the estimators must NOT re-apply it. */
 #define BMS_COULOMBIC_EFF_CHG       0.999f  /* Charge efficiency               */
 #define BMS_COULOMBIC_EFF_DCHG      1.000f  /* Discharge efficiency            */
-#define BMS_SAMPLE_TIME_S           0.1f    /* 100 ms sampling interval        */
+#define BMS_SAMPLE_TIME_S           0.4f    /* 400 ms sampling interval        */
 
 /* SoC limits — clamp estimated value to these bounds */
 #define BMS_SOC_MIN_PCT             0.0f

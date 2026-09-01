@@ -2,16 +2,19 @@
  * @file    test_soh.c
  * @brief   Unit tests for the State-of-Health (SoH) estimator
  *
- * Test time step: 10 s (coarser than production 0.1 s to keep runtimes short).
+ * Test time step: 10 s (coarser than production 0.4 s to keep runtimes short).
  * A 2-hour rest therefore completes in exactly 720 steps.
  *
  * Synthetic scenario used by several tests:
- *   Phase 1 — 720 steps at rest  (I = 0,   V = OCV(90 %))
- *   Phase 2 — 576 steps active   (I = -30 A, V = OCV(10 %))
- *   Phase 3 — 720 steps at rest  (I = 0,   V = OCV(10 %))
+ *   Phase 1 — 720 steps at rest   (I = 0,      V = OCV(90 %))
+ *   Phase 2 — 576 steps active    (I = -1.7 A, V = OCV(10 %))
+ *   Phase 3 — 720 steps at rest   (I = 0,      V = OCV(10 %))
  *
- *   Q = 30 A × 5760 s / 3600 = 48 Ah
- *   ΔSoC = 80 %  →  Qmax = 48 / 0.8 = 60 Ah  →  SoH = 100 %
+ *   Q = 1.7 A × 5760 s / 3600 = 2.72 Ah
+ *   ΔSoC = 80 %  →  Qmax = 2.72 / 0.8 = 3.4 Ah  →  SoH = 100 %
+ *
+ * The discharge current is C/2 for the 3.4 Ah cell, sized so a healthy cell
+ * lands exactly on SoH = 100 % rather than being clamped there from above.
  *
  * @author  Orfeu Mouret
  */
@@ -27,8 +30,8 @@ static int s_pass = 0, s_fail = 0;
 
 #define DT_TEST         10.0f    /* 10 s time step                              */
 #define REST_STEPS      720U     /* 720 × 10 s = 7200 s = SOH_MIN_REST_DURATION */
-#define DISCHARGE_STEPS 576U     /* 576 × 10 s × 30 A / 3600 = 48 Ah           */
-#define DISCHARGE_A     (-30.0f)
+#define DISCHARGE_STEPS 576U     /* 576 × 10 s × 1.7 A / 3600 = 2.72 Ah        */
+#define DISCHARGE_A     (-1.7f)  /* C/2 for the 3.4 Ah cell                    */
 
 #define SOH_TOL         0.5f     /* SoH comparison tolerance [%] */
 
@@ -119,7 +122,7 @@ void test_no_update_below_min_delta_soc(void)
 
     /* First rest at SoC = 80 % */
     run_rest(&s, v_80pct, REST_STEPS, &t);
-    /* Active: 30 A discharge for 1440 s → ΔQ = 12 Ah → ΔSoC = 20 %*/
+    /* Active for 1440 s; ΔSoC comes from the two OCV lookups (80 % → 60 %) */
     run_active(&s, DISCHARGE_A, v_60pct, 144U, &t);
     /* Second rest at SoC = 60 % */
     run_rest(&s, v_60pct, REST_STEPS, &t);
@@ -165,7 +168,7 @@ void test_two_consecutive_updates(void)
     run_rest  (&s, v_10pct, REST_STEPS, &t);
 
     /* Window 2 — charge back up */
-    run_active(&s, 30.0f, v_90pct, DISCHARGE_STEPS, &t);
+    run_active(&s, 1.7f, v_90pct, DISCHARGE_STEPS, &t);
     run_rest  (&s, v_90pct, REST_STEPS, &t);
 
     ASSERT_EQ(2U, s.soh_update_count);
@@ -175,6 +178,10 @@ void test_two_consecutive_updates(void)
 int main(void)
 {
     printf("\n=== SoH Estimator Unit Tests ===\n\n");
+
+    /* Prerequisite: the estimator resolves rest SoC through SocOcv_LookupSoc(),
+     * and the scenario helpers build their voltages from the same table */
+    LOAD_OCV_TABLE_OR_FAIL();
 
     test_init_sets_seeking_rest_phase();
     test_init_sets_no_valid_estimate();

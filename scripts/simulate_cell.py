@@ -114,7 +114,7 @@ def _apply_slew(current: float, target: float, max_delta: float) -> float:
 # As I don't want regen behavior in my case, I put regen weight to 0 here
 def generate_discharge_cycle(
     duration_s: int,
-    dt: float = 0.1,
+    dt: float = 0.4,
     discharge_slew_rate: float = DISCHARGE_MAX_SLEW,
     state_duration_min_s: float = 30.0,
     state_duration_max_s: float = 300.0,
@@ -179,7 +179,7 @@ def generate_discharge_cycle(
 
 def generate_charge_cycle(
     duration_s: int,
-    dt: float = 0.1,
+    dt: float = 0.4,
     I_cc: float = 30.0,
     slew_rate: float = 5.0,
 ) -> list:
@@ -200,7 +200,7 @@ def generate_charge_cycle(
 
 def generate_mixed_cycles(
     total_duration_s: int,
-    dt: float = 0.1,
+    dt: float = 0.4,
     # Charge sub-cycle parameters (shared across all charge cycles)
     I_cc: float = 30.0,
     slew_rate: float = 5.0,
@@ -310,7 +310,7 @@ def generate_mixed_cycles(
 # ---- ECM simulation to get current corresponding voltage and SoC ----
 
 def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
-             dt: float = 0.1, noise_sigma_mv: float = 5.0,
+             dt: float = 0.4, noise_sigma_mv: float = 5.0,
              profile_mode: str = 'discharge', **charge_kwargs):
     """Run full ECM simulation and return list of records."""
     _MIXED_KEYS = {

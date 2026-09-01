@@ -3,12 +3,15 @@
  * @brief   Extended Kalman Filter SoC Estimator
  *          State: x = [SoC, V_RC]  (1st order ECM / Randles model)
  *
- * State-space (discrete, Δt = 0.1 s):
- *   SoC(k)  = SoC(k-1)  + [I(k) × Δt] / [3600 × Q_nom × η]   (positive I = charge)
+ * State-space (discrete):
+ *   SoC(k)  = SoC(k-1)  + [I(k) × Δt] / [3600 × Q_nom]       (positive I = charge)
  *   V_RC(k) = exp(−Δt/(R1×C1)) × V_RC(k-1) + R1×(1−exp(−Δt/(R1×C1))) × I(k)
  *
  * Measurement equation (terminal voltage):
  *   y(k) = OCV(SoC(k)) + V_RC(k) + R0 × I(k)
+ *
+ * The coulombic efficiency is not applied here: the BMS already scales the
+ * cell current integral by η before passing it to this estimator.
  *
  * @author  Kamal Kadakara
  */
@@ -18,10 +21,16 @@
 #include <math.h>
 #include <string.h>
 
-/* ---- Default Noise Parameters (tune for target cell/sensors) ---- */
-#define EKF_Q11    1e-6f    /* Process noise — SoC              */
-#define EKF_Q22    1e-4f    /* Process noise — V_RC             */
-#define EKF_R      1e-2f    /* Measurement noise — voltage [V²] */
+/* ---- Default Noise Parameters (tune for target cell/sensors) ----
+ * The Q terms are noise *densities* expressed per second, not per update step.
+ * The prediction step multiplies them by dt, because the drift they represent
+ * (current sensor bias, capacity drift, ECM mismatch) accumulates with elapsed
+ * time rather than with the number of calls to SocEkf_Update().  The tuning
+ * therefore stays valid whatever the update period is.
+ */
+#define EKF_Q11    1e-5f    /* Process noise density — SoC  [1/s]  */
+#define EKF_Q22    1e-3f    /* Process noise density — V_RC [1/s]  */
+#define EKF_R      1e-2f    /* Measurement noise — voltage [V²]    */
 
 static Bms_EcmParams_t s_ecm;
 
@@ -66,13 +75,12 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     float I  = current_a;
     float dt = dt_s;
     float Q_nom = BMS_CELL_CAPACITY_INI_AH;
-    float eta   = (I >= 0.0f) ? BMS_COULOMBIC_EFF_CHG : BMS_COULOMBIC_EFF_DCHG;
 
     /* ECM time constant */
     float tau   = s_ecm.R1 * s_ecm.C1;
     float A11   = 1.0f;
     float A22   = expf(-dt / tau);
-    float B1    = (dt * eta) / (3600.0f * Q_nom);
+    float B1    = dt / (3600.0f * Q_nom);   /* current is already η-corrected */
     float B2    = s_ecm.R1 * (1.0f - A22);
 
     /* ---- 1. Prediction Step ---- */
@@ -84,12 +92,15 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
     if (x_pred[0] < 0.0f) x_pred[0] = 0.0f;
     if (x_pred[0] > 1.0f) x_pred[0] = 1.0f;
 
-    /* Predicted covariance: P_pred = A·P·Aᵀ + Q  (diagonal A) */
+    /* Predicted covariance: P_pred = A·P·Aᵀ + Q·dt  (diagonal A) */
+    /* Q is scaled by dt so that a given amount of model drift is injected per
+     * second of elapsed time rather than per call: halving the update period
+     * then no longer halves the process noise the filter accumulates. */
     float P_pred[2][2];
-    P_pred[0][0] = A11*A11 * ekf->P[0][0] + ekf->Q[0][0];
+    P_pred[0][0] = A11*A11 * ekf->P[0][0] + ekf->Q[0][0] * dt;
     P_pred[0][1] = A11*A22 * ekf->P[0][1];
     P_pred[1][0] = A22*A11 * ekf->P[1][0];
-    P_pred[1][1] = A22*A22 * ekf->P[1][1] + ekf->Q[1][1];
+    P_pred[1][1] = A22*A22 * ekf->P[1][1] + ekf->Q[1][1] * dt;
 
     /* ---- 2. Measurement Update ---- */
     /* Predicted terminal voltage [mV → V conversion for noise tuning] */

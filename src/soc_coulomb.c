@@ -3,9 +3,12 @@
  * @brief   Coulomb Counting SoC estimator
  *
  * Formula:
- *   SoC(k) = SoC(k-1) - [ I(k) × Δt ] / [ 3600 × Q_nom × η ]
+ *   SoC(k) = SoC(k-1) + 100 × [ I(k) × Δt ] / [ 3600 × Q_nom ]
  *
  * Sign convention: positive current = charging
+ *
+ * The coulombic efficiency is not applied here: the BMS already scales the
+ * cell current integral by η before passing it to this estimator.
  *
  * @author  Kamal Kadakara
  */
@@ -29,12 +32,8 @@ Bms_Error_t SocCoulomb_Update(Bms_SocState_t *state,
     if (state == NULL) return BMS_ERR_NOT_INITIALISED;
     if (!state->is_initialised) return BMS_ERR_NOT_INITIALISED;
 
-    /* Select efficiency factor based on current direction */
-    float eta = (current_a >= 0.0f) ? BMS_COULOMBIC_EFF_CHG
-                                    : BMS_COULOMBIC_EFF_DCHG;
-
-    /* Coulomb Counting integration */
-    float delta_soc = (current_a * dt_s * eta) /
+    /* Coulomb Counting integration — current_a is already η-corrected upstream */
+    float delta_soc = (current_a * dt_s) /
                       (3600.0f * BMS_CELL_CAPACITY_INI_AH) * 100.0f;
 
     state->soc_prev_pct = state->soc_pct;

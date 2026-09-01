@@ -10,11 +10,13 @@
  *          Qmax_current is derived from a charge/discharge window bounded
  *          by two confirmed rest periods:
  *
- *              Qmax_current = |η × ∫ I dt| / ( ΔSoC / 100 )
+ *              Qmax_current = | ∫ I dt | / ( ΔSoC / 100 )
  *
  *          where ΔSoC is obtained from OCV lookups at each confirmed rest
  *          and the integral accumulates Ah between those rests.  An update
  *          is only accepted when ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.
+ *          The coulombic efficiency is already applied to the current by the
+ *          BMS upstream, so it does not appear in the formula above.
  *
  * @author  Orfeu Mouret
  */
@@ -30,7 +32,9 @@
  * ========================================================= */
 
 /** Minimum consecutive duration with |I| < threshold to declare rest [s] */
-#define SOH_MIN_REST_DURATION_S         1800   /* 7200.0f for 2 h */
+/* 2 h: long enough for the cell to reach electrochemical equilibrium, so the
+ * OCV lookup at the rest point is not biased by residual polarisation. */
+#define SOH_MIN_REST_DURATION_S         7200
 
 /** Current magnitude below which the cell is considered at rest [A] */
 #define SOH_REST_CURRENT_THRESHOLD_A    0.05f
@@ -77,7 +81,8 @@ void Soh_Init(Soh_State_t *s);
  * @brief  Process one sample.
  *
  * @param  s           Estimator state
- * @param  current_a   Measured current [A]  (positive = charge)
+ * @param  current_a   Measured current [A]  (positive = charge), already scaled
+ *                     by the coulombic efficiency by the BMS
  * @param  v_meas_mv   Terminal voltage [mV] (used for OCV SoC lookup at rest)
  * @param  t_s         Timestamp of this sample to be processed [s]
  * @param  dt_s        Time step duration [s]

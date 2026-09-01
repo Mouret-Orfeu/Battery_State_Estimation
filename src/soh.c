@@ -12,8 +12,11 @@
  *
  *   SEEKING_REST : waiting for the first confirmed rest; no integral yet.
  *   AT_REST      : resting; no charge integration.
- *   ACTIVE       : integrating charge (η × I × dt).  When the next rest is
+ *   ACTIVE       : integrating charge (I × dt).  When the next rest is
  *                  confirmed, Qmax and SoH are computed if ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.
+ *
+ * The coulombic efficiency is not applied here: the BMS already scales the
+ * cell current integral by η before passing it to this estimator.
  *
  * Rest confirmation fires on the exact step where rest_timer first reaches
  * SOH_MIN_REST_DURATION_S (edge detection, not level detection).
@@ -121,10 +124,8 @@ Bms_Error_t Soh_Update(Soh_State_t *soh_state,
                 soh_state->phase = SOH_PHASE_AT_REST;
 
             } else if (!at_rest) {
-                /* Accumulate charge with coulombic efficiency */
-                float eta = (current_a >= 0.0f) ? BMS_COULOMBIC_EFF_CHG
-                                                 : BMS_COULOMBIC_EFF_DCHG;
-                soh_state->charge_integral_ah += current_a * dt_s * eta / 3600.0f;
+                /* Accumulate charge — current_a is already η-corrected upstream */
+                soh_state->charge_integral_ah += current_a * dt_s / 3600.0f;
             }
             break;
 

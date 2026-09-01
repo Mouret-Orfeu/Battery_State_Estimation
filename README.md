@@ -78,11 +78,12 @@ Voc(SoC)  === C1   V_terminal
 ### 1. Coulomb Counting (`soc_coulomb.c`)
 
 ```
-SoC(t) = SoC(t-1) - (I × Δt) / (3600 × Q_nom × η)
+SoC(t) = SoC(t-1) + 100 × (I × Δt) / (3600 × Q_nom)
 ```
 
 - Integrates measured current at each sampling step
-- Applies Coulombic efficiency `η` during charge/discharge
+- Coulombic efficiency `η` is **not** applied here — the BMS already scales the
+  cell current integral by `η` before handing it to the estimator
 - Requires accurate initial SoC (uses OCV lookup at startup)
 - (Δt is in second and is divided by 3600 so the numerator is in A.h like Q_nom)
 
@@ -108,12 +109,13 @@ Covariance update:  P(k|k) = (I − K·H)·P(k|k-1)
 ```
 SoH [%] = ( Qmax_current / Qmax_nom ) × 100
 
-Qmax_current = |η × ∫ I dt| / ( ΔSoC / 100 )
+Qmax_current = | ∫ I dt | / ( ΔSoC / 100 )
 ```
 
-- Detects rest periods where `|I| < 0.5 A` for ≥ 2 hours (old)
+- Detects rest periods where `|I| < 0.05 A` (`SOH_REST_CURRENT_THRESHOLD_A`)
+  for ≥ 2 h (`SOH_MIN_REST_DURATION_S`)
 - At each confirmed rest, reads equilibrium SoC via OCV lookup
-- Integrates charge (with coulombic efficiency) between consecutive rests
+- Integrates charge between consecutive rests (`η` already applied upstream)
 - An update is only accepted when `ΔSoC ≥ 80 %` across the active window
 - All thresholds are compile-time constants at the top of `soh.h`
 
@@ -165,7 +167,7 @@ This project reflects design patterns applied in ASIL C/D BMS development:
 - Standards: ISO 26262, IEC 62133, SAE J1772
 - Cell chemistry: NMC (Nickel Manganese Cobalt) — 3.0 V – 4.2 V
 - Nominal capacity: 60 Ah (old) (configurable via `bms_types.h`)
-- Sampling rate: 100 ms (10 Hz)
+- Sampling rate: 400 ms (2.5 Hz, with `BMS_SAMPLE_TIME_S` in `bms_types.h`)
 
 ---
 

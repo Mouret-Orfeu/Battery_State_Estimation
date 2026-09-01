@@ -18,9 +18,10 @@ static int s_pass = 0, s_fail = 0;
 #define STEADY_TOL      0.5f    /* 0.5%  SoC — no-drift check        */
 #define CONV_TOL_PCT    3.0f    /* 3%    SoC — convergence tolerance  */
 
-/* A good amount of steps to be sure to reach convergence 
- * even for flat regions of signals and high measurement noise (10 000s ~ 3h, at 10 Hz) */
-#define CONV_STEPS      10000 
+/* A good amount of steps to be sure to reach convergence
+ * even for flat regions of signals and high measurement noise
+ * (10 000 steps × BMS_SAMPLE_TIME_S = 4 000 s ~ 1.1 h, at 2.5 Hz) */
+#define CONV_STEPS      10000
 
 static const Bms_EcmParams_t s_default_ecm = BMS_ECM_DEFAULT;
 
@@ -132,6 +133,10 @@ void test_soc_clamps_at_100(void)
 int main(void)
 {
     printf("\n=== Extended Kalman Filter SoC Unit Tests ===\n\n");
+
+    /* Prerequisite: the EKF reads OCV(SoC) for its measurement model and Jacobian,
+     * and the helpers below build v_meas_mv from the same table */
+    LOAD_OCV_TABLE_OR_FAIL();
 
     test_init_sets_correct_soc();
     test_null_ekf_returns_error();

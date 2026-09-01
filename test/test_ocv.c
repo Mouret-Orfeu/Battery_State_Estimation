@@ -16,9 +16,7 @@ static int s_pass = 0, s_fail = 0;
 #define FLOAT_TOL   0.01f   /* 0.01% SoC tolerance */
 #define VOLT_TOL    0.1f    /* 0.1 mV voltage tolerance */
 
-/* Absolute path to the NCA processed OCV-SoC CSV (101 rows, 1% SoC steps) */
-#define NCA_CSV_PATH \
-    "/home/orfeu/Documents/documents/important/travail/thèse/Doctorant en IA et électrochimie (Prediction du SoH batterie)/Taff_Thèse/code et données/BaseCamp/Battery_State_Estimation/data/OCV_SoC/OCV_SOC_NCA_1_folder/OCV_SOC_NCA_1_processed.csv"
+/* The NCA processed OCV-SoC CSV path comes from OCV_TABLE_CSV_PATH in test_helpers.h */
 
 /* ---- OCV table reference values ----
  * Switch active/commented block to match the loaded chemistry.
@@ -32,15 +30,18 @@ static int s_pass = 0, s_fail = 0;
  * #define OCV_55PCT_MV     3690.0f
  * #define OCV_MID_MV       3675.0f  // midpoint 50–55% → 52.5% SoC
  *
- * NCA table — OCV_SOC_NCA_1_processed.csv:
+ * NCA table — OCV_SOC_NCA_1_processed.csv (101 entries, 1 % SoC steps).
+ * Interpolation is checked between two *adjacent* entries, so the midpoint test
+ * uses 52 % / 53 % rather than the 50 % / 55 % pair the old 5 % table allowed.
  */
 #define OCV_MIN_MV       2835.0f
 #define OCV_MAX_MV       4172.0f
 #define OCV_BELOW_MIN_MV 2800.0f
 #define OCV_ABOVE_MAX_MV 4201.0f
 #define OCV_50PCT_MV     3680.0f
-#define OCV_55PCT_MV     3725.0f
-#define OCV_MID_MV       3702.5f   /* midpoint 50–55% → 52.5% SoC */
+#define OCV_52PCT_MV     3696.0f
+#define OCV_53PCT_MV     3705.0f
+#define OCV_MID_MV       3700.5f   /* midpoint 52–53% → 52.5% SoC */
 
 /* ---- Tests: SocOcv_LoadTableFromCsv ---- */
 
@@ -56,7 +57,7 @@ void test_load_csv_nonexistent_path_returns_error(void)
 
 void test_load_csv_valid_nca_file_returns_ok(void)
 {
-    ASSERT_EQ(BMS_OK, SocOcv_LoadTableFromCsv(NCA_CSV_PATH));
+    ASSERT_EQ(BMS_OK, SocOcv_LoadTableFromCsv(OCV_TABLE_CSV_PATH));
 }
 
 /* ---- Tests: SocOcv_LookupSoc ---- */
@@ -103,7 +104,7 @@ void test_lookup_exact_table_entry(void)
 
 void test_lookup_interpolates_midpoint(void)
 {
-    /* OCV_MID_MV is midway between 50% and 55% → 52.5% SoC */
+    /* OCV_MID_MV is midway between the 52% and 53% entries → 52.5% SoC */
     float soc = 0.0f;
     Bms_Error_t err = SocOcv_LookupSoc(OCV_MID_MV, &soc);
     ASSERT_EQ(BMS_OK, err);
@@ -140,7 +141,7 @@ void test_getocv_at_mid_table(void)
 
 void test_getocv_interpolates_midpoint(void)
 {
-    /* 52.5% lies midway between 50% and 55% → OCV_MID_MV */
+    /* 52.5% lies midway between the 52% and 53% entries → OCV_MID_MV */
     ASSERT_FLOAT_NEAR(OCV_MID_MV, SocOcv_GetOcv(52.5f), VOLT_TOL);
 }
 
@@ -160,10 +161,7 @@ int main(void)
     printf("\n=== OCV Lookup Table Unit Tests ===\n\n");
 
     /* Prerequisite: populate the table — all lookup/getocv tests depend on this */
-    if (SocOcv_LoadTableFromCsv(NCA_CSV_PATH) != BMS_OK) {
-        printf("[FATAL] Failed to load OCV CSV:\n  %s\n", NCA_CSV_PATH);
-        return 1;
-    }
+    LOAD_OCV_TABLE_OR_FAIL();
 
     test_load_csv_null_path_returns_error();
     test_load_csv_nonexistent_path_returns_error();

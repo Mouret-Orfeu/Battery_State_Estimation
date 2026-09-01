@@ -30,7 +30,8 @@ void SocEkf_Init(Bms_EkfState_t *ekf,
  *
  * @param  ekf        EKF internal state
  * @param  state      SoC output state (updated with new estimate)
- * @param  current_a  Measured pack current [A] (positive = charge)
+ * @param  current_a  Measured pack current [A] (positive = charge), already
+ *                    scaled by the coulombic efficiency by the BMS
  * @param  v_meas_mv  Measured terminal voltage [mV]
  * @param  dt_s       Time step [s]
  * @return BMS_OK on success; BMS_ERR_NOT_INITIALISED if ekf or state is NULL
