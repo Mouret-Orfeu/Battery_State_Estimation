@@ -57,6 +57,9 @@ def _load_lib() -> ctypes.CDLL:
     ]
     lib.Soh_ComputeFromTimeSeries.restype = ctypes.c_uint32
 
+    lib.SocOcv_LoadTableFromCsv.argtypes = [ctypes.c_char_p]
+    lib.SocOcv_LoadTableFromCsv.restype  = ctypes.c_uint
+
     return lib
 
 
@@ -82,12 +85,24 @@ def main():
         help='Input CSV produced by simulate_cell.py',
     )
     parser.add_argument(
-        '--output', type=str, default='docs/soh_estimation.png',
+        '--output', type=str,
+        default='docs/simulated_cell_behavior/plots/soh_plots/soh_estimation.png',
         help='Output plot file',
+    )
+    parser.add_argument(
+        '--ocv-table', type=str,
+        default=str(_REPO_ROOT / 'data' / 'OCV_SoC' / 'OCV_SOC_NCA_1_folder' / 'OCV_SOC_NCA_1_processed.csv'),
+        help='OCV–SoC lookup table CSV (soc,ocv_mv columns)',
     )
     args = parser.parse_args()
 
-    lib     = _load_lib()
+    lib = _load_lib()
+
+    ret = lib.SocOcv_LoadTableFromCsv(args.ocv_table.encode())
+    if ret != 0:
+        raise RuntimeError(f'SocOcv_LoadTableFromCsv failed (err={ret}) for "{args.ocv_table}"')
+    print(f'[INFO] OCV table loaded from {args.ocv_table}')
+
     records = load_csv(args.input)
     n       = len(records)
     dt      = records[1]['time_s'] - records[0]['time_s'] if n > 1 else 0.1
@@ -116,21 +131,29 @@ def main():
     soh_times_h = [out_times[i] / 3600.0 for i in range(n_updates)]
     soh_values  = [out_soh[i]             for i in range(n_updates)]
 
-    time_h  = [r['time_s'] / 3600.0 for r in records]
-    current = [r['current_a']        for r in records]
+    time_h   = [r['time_s'] / 3600.0 for r in records]
+    current  = [r['current_a']        for r in records]
+    true_soc = [r['true_soc_pct']     for r in records]
 
     # ---- Plot ----
-    fig = plt.figure(figsize=(12, 6))
-    gs  = gridspec.GridSpec(2, 1, height_ratios=[1.5, 2], hspace=0.4)
+    fig = plt.figure(figsize=(12, 8))
+    gs  = gridspec.GridSpec(3, 1, height_ratios=[1.5, 1.5, 2], hspace=0.4)
 
     ax_cur = fig.add_subplot(gs[0])
-    ax_soh = fig.add_subplot(gs[1], sharex=ax_cur)
+    ax_soc = fig.add_subplot(gs[1], sharex=ax_cur)
+    ax_soh = fig.add_subplot(gs[2], sharex=ax_cur)
 
     ax_cur.plot(time_h, current, color='dimgray', lw=0.6)
     ax_cur.axhline(0, color='k', lw=0.5, ls='--')
     ax_cur.set_ylabel('Current (A)')
     ax_cur.grid(True, alpha=0.3)
     plt.setp(ax_cur.get_xticklabels(), visible=False)
+
+    ax_soc.plot(time_h, true_soc, color='tab:green', lw=0.8)
+    ax_soc.set_ylabel('True SoC (%)')
+    ax_soc.set_ylim(0, 105)
+    ax_soc.grid(True, alpha=0.3)
+    plt.setp(ax_soc.get_xticklabels(), visible=False)
 
     if n_updates > 0:
         ax_soh.step(soh_times_h, soh_values, where='post',

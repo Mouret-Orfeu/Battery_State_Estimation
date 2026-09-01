@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 
 _BASE_DIR  = pathlib.Path(__file__).resolve().parent.parent / "docs" / "simulated_cell_behavior"
 CSV_DIR    = _BASE_DIR / "csv"
-PLOTS_DIR  = _BASE_DIR / "plots"
+PLOTS_DIR  = _BASE_DIR / "plots" / "cycling_signal_plots"
 
 def _next_output_paths() -> tuple[pathlib.Path, pathlib.Path]:
     CSV_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,10 +46,11 @@ def _next_output_paths() -> tuple[pathlib.Path, pathlib.Path]:
 
 # ---- Simulation parameters ----
 
-# Default duration for the main simulation
-DEFAULT_SIMULATION_DURATION_S = 60*60*2  # 2 hours
+# Default duration for the main simulation (s)
+# DEFAULT_SIMULATION_DURATION_S = 60*60*2  # 2 hours
+DEFAULT_SIMULATION_DURATION_S = 3600*10 + 5*30*60  # 10 hours + 5x30min mixed cycles
 
-# Max per-step change in current during discharge and cahrge
+# Max per-step change in current during discharge and charge
 DISCHARGE_MAX_SLEW = 5.0  
 CHARGE_MAX_SLEW    = 5.0
 
@@ -74,7 +75,8 @@ R1 = 0.008   # RC resistance [Ω]
 C1 = 1500.0  # RC capacitance [F]
 
 # ---- Cell Parameters (must match bms_types.h / soc_ekf.c) ----
-BMS_CELL_CAPACITY_INI_AH = 60.0
+# BMS_CELL_CAPACITY_INI_AH = 60.0
+BMS_CELL_CAPACITY_INI_AH = 4.2
 
 # ---- OCV Table (0–100%, 5% steps) ----
 OCV_TABLE_MV = [
@@ -207,9 +209,18 @@ def generate_mixed_cycles(
     discharge_duration_std_s: float = DEFAULT_MIXED_DISCHARGE_DURATION_STD_S,
     charge_duration_mean_s: float = DEFAULT_MIXED_CHARGE_DURATION_MEAN_S,
     charge_duration_std_s: float = DEFAULT_MIXED_CHARGE_DURATION_STD_S,
-    # Rest period distribution between sub-cycles
+    # Rest period distribution "a" between sub-cycles
     rest_duration_mean_s: float = DEFAULT_MIXED_REST_DURATION_MEAN_S,
     rest_duration_std_s: float = DEFAULT_MIXED_REST_DURATION_STD_S,
+    # Rest period distribution "b" — selected per-occurrence via rest_duration_pattern
+    rest_duration_mean_s_b: float = DEFAULT_MIXED_REST_DURATION_MEAN_S,
+    rest_duration_std_s_b: float = DEFAULT_MIXED_REST_DURATION_STD_S,
+    # Sequence of 'a'/'b' picking which rest distribution to draw from, one entry
+    # per rest actually emitted, cycling (index % len(pattern)) once exhausted
+    rest_duration_pattern: list = None,
+    # Which sub-cycle phases get a trailing rest period
+    rest_after_charge: bool = True,
+    rest_after_discharge: bool = True,
     # Which phase starts the sequence
     first_phase: str = DEFAULT_MIXED_FIRST_PHASE,
     # Discharge cycle distribution parameters (forwarded to generate_discharge_cycle)
@@ -220,13 +231,23 @@ def generate_mixed_cycles(
     periods, until total_duration_s is reached.
 
     Sub-cycle durations are drawn from N(mean, std), clamped to [10 s, remaining].
-    Rest durations are drawn from N(mean, std), clamped to [0, remaining].
+    Rest durations are drawn from distribution 'a' (rest_duration_mean_s/std_s) or
+    'b' (rest_duration_mean_s_b/std_s_b), clamped to [0, remaining], selected per
+    rest occurrence by cycling through rest_duration_pattern (default ['a']).
     All charge sub-cycles share the same parameters except their duration.
+    A rest is only inserted after a sub-cycle whose phase has its
+    rest_after_charge / rest_after_discharge flag set to True.
     """
+    rest_dists = {
+        'a': (rest_duration_mean_s, rest_duration_std_s),
+        'b': (rest_duration_mean_s_b, rest_duration_std_s_b),
+    }
+    pattern = rest_duration_pattern or ['a']
     MIN_SUB_DURATION_S = 10
     profile = []
     t_offset = 0.0
     phase = first_phase
+    rest_count = 0
 
     while t_offset < total_duration_s:
         remaining = total_duration_s - t_offset
@@ -255,26 +276,33 @@ def generate_mixed_cycles(
             profile.append((t_abs, i_a))
 
         t_offset += duration_s
+        completed_phase = phase
         phase = 'charge' if phase == 'discharge' else 'discharge'
 
         if t_offset >= total_duration_s:
             break
 
-        # ---- Rest period generation ----   
+        # ---- Rest period generation ----
 
-        # Rest period (zero current)
-        raw_rest_duration  = random.gauss(rest_duration_mean_s, rest_duration_std_s)
-        rest_s    = max(0.0, min(total_duration_s - t_offset, raw_rest_duration))
-        rest_steps = int(rest_s / dt)
+        want_rest = (completed_phase == 'charge' and rest_after_charge) or \
+                    (completed_phase == 'discharge' and rest_after_discharge)
 
-        # ---- End of simulation detection ----   
+        if want_rest:
+            # Rest period (zero current) — distribution cycles through rest_duration_pattern
+            mean_s, std_s      = rest_dists[pattern[rest_count % len(pattern)]]
+            raw_rest_duration  = random.gauss(mean_s, std_s)
+            rest_s    = max(0.0, min(total_duration_s - t_offset, raw_rest_duration))
+            rest_steps = int(rest_s / dt)
+            rest_count += 1
 
-        for i in range(rest_steps):
-            t_abs = round(t_offset + i * dt, 2)
-            if t_abs >= total_duration_s:
-                break
-            profile.append((t_abs, 0.0))
-        t_offset += rest_steps * dt
+            # ---- End of simulation detection ----
+
+            for i in range(rest_steps):
+                t_abs = round(t_offset + i * dt, 2)
+                if t_abs >= total_duration_s:
+                    break
+                profile.append((t_abs, 0.0))
+            t_offset += rest_steps * dt
 
     return profile
 
@@ -288,7 +316,9 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
     _MIXED_KEYS = {
         'discharge_duration_mean_s', 'discharge_duration_std_s',
         'charge_duration_mean_s', 'charge_duration_std_s',
-        'rest_duration_mean_s', 'rest_duration_std_s', 'first_phase',
+        'rest_duration_mean_s', 'rest_duration_std_s',
+        'rest_duration_mean_s_b', 'rest_duration_std_s_b', 'rest_duration_pattern',
+        'first_phase', 'rest_after_charge', 'rest_after_discharge',
     }
     _DISCHARGE_KEYS = {
         'discharge_slew_rate', 'state_duration_min_s', 'state_duration_max_s',
@@ -352,7 +382,7 @@ def main():
                         help='Nominal capacity [Ah]')
     parser.add_argument('--duration',    type=int,   default=DEFAULT_SIMULATION_DURATION_S,
                         help='Simulation duration [s]')
-    parser.add_argument('--initial-soc', type=float, default=90.0,
+    parser.add_argument('--initial-soc', type=float, default=0.0,
                         help='Initial SoC [%%]')
     parser.add_argument('--seed',        type=int,   default=42,
                         help='Random seed for reproducibility')
@@ -361,7 +391,7 @@ def main():
                         help='Current profile: discharge, CC charge, or mixed')
 
     # Charge-specific arguments (used when --profile is charge or mixed)
-    parser.add_argument('--charge-current', type=float, default=30.0,
+    parser.add_argument('--charge-current', type=float, default=4.2,
                         help='Charge current [A]')
     parser.add_argument('--slew-rate',      type=float, default=CHARGE_MAX_SLEW,
                         help='Charge current ramp rate [A/s]')
@@ -414,7 +444,24 @@ def main():
                         help='Mean rest period duration between sub-cycles [s]')
     parser.add_argument('--rest-duration-std',       type=float,
                         default=DEFAULT_MIXED_REST_DURATION_STD_S,
-                        help='Std dev of rest period duration [s]')
+                        help='Std dev of rest period duration [s] (distribution "a")')
+    parser.add_argument('--rest-duration-mean-b',    type=float,
+                        default=DEFAULT_MIXED_REST_DURATION_MEAN_S,
+                        help='Mean rest period duration [s] (distribution "b")')
+    parser.add_argument('--rest-duration-std-b',     type=float,
+                        default=DEFAULT_MIXED_REST_DURATION_STD_S,
+                        help='Std dev of rest period duration [s] (distribution "b")')
+    parser.add_argument('--rest-duration-pattern',   type=str, nargs='+',
+                        default=['a'], choices=['a', 'b'], metavar='{a,b}',
+                        help='Sequence of "a"/"b" picking which rest distribution to draw '
+                             'from, one entry per rest actually emitted, cycling once '
+                             'exhausted (default: always "a")')
+    parser.add_argument('--rest-after-charge',       action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help='Insert a rest period after each charge sub-cycle')
+    parser.add_argument('--rest-after-discharge',    action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help='Insert a rest period after each discharge sub-cycle')
     parser.add_argument('--first-phase',             type=str,
                         default=DEFAULT_MIXED_FIRST_PHASE,
                         choices=['discharge', 'charge'],
@@ -443,6 +490,11 @@ def main():
         charge_duration_std_s=args.charge_duration_std,
         rest_duration_mean_s=args.rest_duration_mean,
         rest_duration_std_s=args.rest_duration_std,
+        rest_duration_mean_s_b=args.rest_duration_mean_b,
+        rest_duration_std_s_b=args.rest_duration_std_b,
+        rest_duration_pattern=args.rest_duration_pattern,
+        rest_after_charge=args.rest_after_charge,
+        rest_after_discharge=args.rest_after_discharge,
         first_phase=args.first_phase,
         # discharge distribution params (discharge and mixed)
         discharge_slew_rate=args.discharge_slew_rate,

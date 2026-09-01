@@ -98,12 +98,13 @@ Bms_Error_t Soh_Update(Soh_State_t *soh_state,
         /* ---- Active: integrating charge ---- */
         case SOH_PHASE_ACTIVE:
             if (rest_just_confirmed) {
-                /* New rest confirmed — attempt Qmax / SoH update */
+                /* New rest confirmed, attempt Qmax / SoH update */
                 float soc_end_pct = 0.0f;
                 SocOcv_LookupSoc(v_meas_mv, &soc_end_pct);
 
                 float delta_soc = fabsf(soc_end_pct - soh_state->soc_at_rest_entry_pct);
-
+                
+                /* Check if the change in SoC is significant enough to warrant a SoH update */
                 if (delta_soc >= SOH_MIN_DELTA_SOC_PCT) {
                     float qmax_ah = fabsf(soh_state->charge_integral_ah)
                                   / (delta_soc / 100.0f);

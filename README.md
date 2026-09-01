@@ -88,9 +88,9 @@ SoC(t) = SoC(t-1) - (I × Δt) / (3600 × Q_nom × η)
 
 ### 2. OCV Lookup (`soc_ocv.c`)
 
-- Uses a 21-point OCV–SoC table (0–100% in 5% steps) for NMC chemistry
+- Uses a 21-point OCV–SoC table (0–100% in 5% steps) for NMC chemistry (old)
 - Linear interpolation between table entries
-- Valid only after ≥ 2 hours of rest (equilibrium condition)
+- Valid only after ≥ 2 hours of rest (equilibrium condition) (old)
 - Used for SoC initialisation at ignition ON
 
 ### 3. Extended Kalman Filter (`soc_ekf.c`)
@@ -111,7 +111,7 @@ SoH [%] = ( Qmax_current / Qmax_nom ) × 100
 Qmax_current = |η × ∫ I dt| / ( ΔSoC / 100 )
 ```
 
-- Detects rest periods where `|I| < 0.5 A` for ≥ 2 hours
+- Detects rest periods where `|I| < 0.5 A` for ≥ 2 hours (old)
 - At each confirmed rest, reads equilibrium SoC via OCV lookup
 - Integrates charge (with coulombic efficiency) between consecutive rests
 - An update is only accepted when `ΔSoC ≥ 80 %` across the active window
@@ -122,7 +122,7 @@ Qmax_current = |η × ∫ I dt| / ( ΔSoC / 100 )
 ## Simulation & Visualisation
 
 ```bash
-# Generate simulated drive cycle current profile + true SoC
+# Generate simulated drive cycle current profile + true SoC command example
 python3 scripts/simulate_cell.py --capacity 60 --duration 3600 --output simulated_cell_behavior.csv
 
 # Compare all three estimators against true SoC
@@ -164,7 +164,7 @@ This project reflects design patterns applied in ASIL C/D BMS development:
 - Language: **C99**, **Python 3.10+**
 - Standards: ISO 26262, IEC 62133, SAE J1772
 - Cell chemistry: NMC (Nickel Manganese Cobalt) — 3.0 V – 4.2 V
-- Nominal capacity: 60 Ah (configurable via `bms_types.h`)
+- Nominal capacity: 60 Ah (old) (configurable via `bms_types.h`)
 - Sampling rate: 100 ms (10 Hz)
 
 ---
