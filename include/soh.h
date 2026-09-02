@@ -13,8 +13,9 @@
  *              Qmax_current = | ∫ I dt | / ( ΔSoC / 100 )
  *
  *          where ΔSoC is obtained from OCV lookups at each confirmed rest
- *          and the integral accumulates Ah between those rests.  An update
- *          is only accepted when ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.
+ *          and the integral accumulates Ah between those rests.  ΔSoC is
+ *          signed, so an update is only accepted for a charge window
+ *          (ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT); discharge windows are ignored.
  *          The coulombic efficiency is already applied to the current by the
  *          BMS upstream, so it does not appear in the formula above.
  *
@@ -39,7 +40,9 @@
 /** Current magnitude below which the cell is considered at rest [A] */
 #define SOH_REST_CURRENT_THRESHOLD_A    0.05f
 
-/** Minimum ΔSoC across an active window required for a valid Qmax update [%] */
+/** Minimum signed ΔSoC across an active window required for a valid Qmax update [%].
+ *  Being positive, it also acts as the charge-only gate: discharge windows are
+ *  rejected because charging is the reproducible direction (CC-CV). */
 #define SOH_MIN_DELTA_SOC_PCT           80.0f
 
 /** Nominal capacity used as SoH reference (mirrors bms_types.h) [Ah] */

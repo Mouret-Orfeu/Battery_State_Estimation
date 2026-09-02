@@ -5,9 +5,14 @@ Generates a synthetic current profile (charge, discharge, or mixed) and the
 resulting voltage and true SoC trajectory via ECM simulation and coulomb counting.
 
 Usage:
-    python3 scripts/simulate_cell.py --duration 7200
-    python3 scripts/simulate_cell.py --capacity 60 --duration 3600
-    python3 scripts/simulate_cell.py --profile charge --initial-soc 20 --duration 3600
+    python3 scripts/simulate_cell.py --n-cycles 5
+    python3 scripts/simulate_cell.py --capacity 3.4 --n-cycles 2
+    python3 scripts/simulate_cell.py --profile charge --initial-soc 20 --charge-duration-mean 3600
+
+The mixed profile is sized by --n-cycles: its total duration is whatever the
+requested sub-cycles and rests add up to, so no sub-cycle is ever cut short.
+The single-phase profiles run for one sub-cycle, sized by --charge-duration-mean
+or --discharge-duration-mean respectively.
 
 Output is always saved to docs/simulated_cell_behavior/simulated_cell_behavior_i.csv,
 where i follows the highest existing index in that folder.
@@ -46,9 +51,8 @@ def _next_output_paths() -> tuple[pathlib.Path, pathlib.Path]:
 
 # ---- Simulation parameters ----
 
-# Default duration for the main simulation (s)
-# DEFAULT_SIMULATION_DURATION_S = 60*60*2  # 2 hours
-DEFAULT_SIMULATION_DURATION_S = 3600*10 + 5*30*60  # 10 hours + 5x30min mixed cycles
+# Shortest sub-cycle generate_mixed_cycles emits; shorter draws are clamped up to it
+MIN_SUB_DURATION_S = 10
 
 # Max per-step change in current during discharge and charge
 DISCHARGE_MAX_SLEW = 5.0  
@@ -68,6 +72,7 @@ DEFAULT_MIXED_CHARGE_DURATION_STD_S     = 60.0 * 10.0  # 10 min
 DEFAULT_MIXED_REST_DURATION_MEAN_S      = 60.0 * 5.0   # 5 min
 DEFAULT_MIXED_REST_DURATION_STD_S       = 60.0 * 1.0   # 1 min
 DEFAULT_MIXED_FIRST_PHASE               = 'discharge'
+DEFAULT_MIXED_CYCLES                    = 5     # charge/discharge pairs per run
 
 # ---- ECM Parameters (NMC, 25°C) ----
 R0 = 0.005   # Ohmic resistance [Ω]
@@ -199,7 +204,7 @@ def generate_charge_cycle(
 
 
 def generate_mixed_cycles(
-    total_duration_s: int,
+    n_cycles: int,
     dt: float = 0.4,
     # Charge sub-cycle parameters (shared across all charge cycles)
     I_cc: float = 30.0,
@@ -227,13 +232,16 @@ def generate_mixed_cycles(
     **discharge_kwargs,
 ) -> list:
     """
-    Concatenate alternating discharge and charge sub-cycles separated by rest
-    periods, until total_duration_s is reached.
+    Concatenate n_cycles charge/discharge pairs separated by rest periods.
 
-    Sub-cycle durations are drawn from N(mean, std), clamped to [10 s, remaining].
+    Every sub-cycle runs to its full drawn length: the profile is built from a
+    cycle count rather than a time budget, so no sub-cycle is ever truncated and
+    the total duration is an outcome of the parameters rather than an input.
+
+    Sub-cycle durations are drawn from N(mean, std), floored at MIN_SUB_DURATION_S.
     Rest durations are drawn from distribution 'a' (rest_duration_mean_s/std_s) or
-    'b' (rest_duration_mean_s_b/std_s_b), clamped to [0, remaining], selected per
-    rest occurrence by cycling through rest_duration_pattern (default ['a']).
+    'b' (rest_duration_mean_s_b/std_s_b), floored at 0, selected per rest
+    occurrence by cycling through rest_duration_pattern (default ['a']).
     All charge sub-cycles share the same parameters except their duration.
     A rest is only inserted after a sub-cycle whose phase has its
     rest_after_charge / rest_after_discharge flag set to True.
@@ -243,44 +251,35 @@ def generate_mixed_cycles(
         'b': (rest_duration_mean_s_b, rest_duration_std_s_b),
     }
     pattern = rest_duration_pattern or ['a']
-    MIN_SUB_DURATION_S = 10
     profile = []
     t_offset = 0.0
     phase = first_phase
     rest_count = 0
 
-    while t_offset < total_duration_s:
-        remaining = total_duration_s - t_offset
+    # One cycle is a charge sub-cycle plus a discharge sub-cycle, ordered by first_phase
+    for _ in range(2 * n_cycles):
 
         # ---- Sub cycle generation ----
 
         if phase == 'discharge':
             raw_duration = random.gauss(discharge_duration_mean_s, discharge_duration_std_s)
-            duration_s   = int(max(MIN_SUB_DURATION_S, min(remaining, raw_duration)))
-            sub_cycle     = generate_discharge_cycle(duration_s, dt, **discharge_kwargs)
+            duration_s   = int(max(MIN_SUB_DURATION_S, raw_duration))
+            sub_cycle    = generate_discharge_cycle(duration_s, dt, **discharge_kwargs)
         else:
             raw_duration = random.gauss(charge_duration_mean_s, charge_duration_std_s)
-            duration_s   = int(max(MIN_SUB_DURATION_S, min(remaining, raw_duration)))
-            sub_cycle     = generate_charge_cycle(
+            duration_s   = int(max(MIN_SUB_DURATION_S, raw_duration))
+            sub_cycle    = generate_charge_cycle(
                 duration_s, dt,
                 I_cc=I_cc,
                 slew_rate=slew_rate,
             )
 
-        # ---- End of simulation detection ----    
-
         for t_s, i_a in sub_cycle:
-            t_abs = round(t_offset + t_s, 2)
-            if t_abs >= total_duration_s:
-                break
-            profile.append((t_abs, i_a))
+            profile.append((round(t_offset + t_s, 2), i_a))
 
         t_offset += duration_s
         completed_phase = phase
         phase = 'charge' if phase == 'discharge' else 'discharge'
-
-        if t_offset >= total_duration_s:
-            break
 
         # ---- Rest period generation ----
 
@@ -289,19 +288,14 @@ def generate_mixed_cycles(
 
         if want_rest:
             # Rest period (zero current) — distribution cycles through rest_duration_pattern
-            mean_s, std_s      = rest_dists[pattern[rest_count % len(pattern)]]
-            raw_rest_duration  = random.gauss(mean_s, std_s)
-            rest_s    = max(0.0, min(total_duration_s - t_offset, raw_rest_duration))
-            rest_steps = int(rest_s / dt)
-            rest_count += 1
-
-            # ---- End of simulation detection ----
+            mean_s, std_s     = rest_dists[pattern[rest_count % len(pattern)]]
+            raw_rest_duration = random.gauss(mean_s, std_s)
+            rest_s            = max(0.0, raw_rest_duration)
+            rest_steps        = int(rest_s / dt)
+            rest_count       += 1
 
             for i in range(rest_steps):
-                t_abs = round(t_offset + i * dt, 2)
-                if t_abs >= total_duration_s:
-                    break
-                profile.append((t_abs, 0.0))
+                profile.append((round(t_offset + i * dt, 2), 0.0))
             t_offset += rest_steps * dt
 
     return profile
@@ -311,8 +305,15 @@ def generate_mixed_cycles(
 
 def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
              dt: float = 0.4, noise_sigma_mv: float = 5.0,
-             profile_mode: str = 'discharge', **charge_kwargs):
-    """Run full ECM simulation and return list of records."""
+             profile_mode: str = 'discharge', n_cycles: int = DEFAULT_MIXED_CYCLES,
+             **charge_kwargs):
+    """
+    Run full ECM simulation and return list of records.
+
+    duration_s sizes the single-phase profiles ('discharge' and 'charge'), while
+    the mixed profile is sized by n_cycles instead and runs for however long its
+    sub-cycles and rests take.
+    """
     _MIXED_KEYS = {
         'discharge_duration_mean_s', 'discharge_duration_std_s',
         'charge_duration_mean_s', 'charge_duration_std_s',
@@ -335,7 +336,7 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
     if profile_mode == 'discharge':
         profile = generate_discharge_cycle(duration_s, dt, **discharge_kwargs)
     elif profile_mode == 'mixed':
-        profile = generate_mixed_cycles(duration_s, dt, **mixed_kwargs, **charge_kwargs, **discharge_kwargs)
+        profile = generate_mixed_cycles(n_cycles, dt, **mixed_kwargs, **charge_kwargs, **discharge_kwargs)
     else:  # CC charge
         profile = generate_charge_cycle(duration_s, dt, **charge_kwargs)
 
@@ -376,12 +377,58 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
     return records
 
 
+def _validate_args(parser, args):
+    """
+    Reject parameter values the generators cannot honour.
+
+    argparse already covers types and choices; these are the constraints that
+    would otherwise be silently clamped inside the generators and quietly produce
+    a profile different from the one requested.
+    """
+    if args.capacity <= 0.0:
+        parser.error(f'--capacity must be > 0, got {args.capacity}')
+
+    if not 0.0 <= args.initial_soc <= 100.0:
+        parser.error(f'--initial-soc must lie within [0, 100], got {args.initial_soc}')
+
+    if args.profile == 'mixed' and args.n_cycles < 1:
+        parser.error(f'--n-cycles must be >= 1, got {args.n_cycles}')
+
+    # Sub-cycle means below the floor would be raised to it without notice
+    for name, value in (('--charge-duration-mean',    args.charge_duration_mean),
+                        ('--discharge-duration-mean', args.discharge_duration_mean)):
+        if value < MIN_SUB_DURATION_S:
+            parser.error(f'{name} must be >= {MIN_SUB_DURATION_S} s, the shortest '
+                         f'sub-cycle the generator emits, got {value}')
+
+    # Negative rest means would be floored to zero, dropping the rest entirely
+    for name, value in (('--rest-duration-mean',   args.rest_duration_mean),
+                        ('--rest-duration-mean-b', args.rest_duration_mean_b)):
+        if value < 0.0:
+            parser.error(f'{name} must be >= 0, got {value}')
+
+    for name, value in (('--charge-duration-std',    args.charge_duration_std),
+                        ('--discharge-duration-std', args.discharge_duration_std),
+                        ('--rest-duration-std',      args.rest_duration_std),
+                        ('--rest-duration-std-b',    args.rest_duration_std_b)):
+        if value < 0.0:
+            parser.error(f'{name} must be >= 0, got {value}')
+
+    # A rest pattern is meaningless when neither phase is allowed a trailing rest
+    if (args.profile == 'mixed'
+            and not (args.rest_after_charge or args.rest_after_discharge)
+            and args.rest_duration_pattern != ['a']):
+        parser.error('--rest-duration-pattern conflicts with --no-rest-after-charge '
+                     'combined with --no-rest-after-discharge, which suppress every rest')
+
+
 def main():
     parser = argparse.ArgumentParser(description='Li-Ion Cell Simulator')
     parser.add_argument('--capacity',    type=float, default=BMS_CELL_CAPACITY_INI_AH,
                         help='Nominal capacity [Ah]')
-    parser.add_argument('--duration',    type=int,   default=DEFAULT_SIMULATION_DURATION_S,
-                        help='Simulation duration [s]')
+    parser.add_argument('--n-cycles',    type=int,   default=DEFAULT_MIXED_CYCLES,
+                        help='Charge/discharge pairs to generate (mixed profile). The total '
+                             'duration follows from this and the sub-cycle/rest durations')
     parser.add_argument('--initial-soc', type=float, default=0.0,
                         help='Initial SoC [%%]')
     parser.add_argument('--seed',        type=int,   default=42,
@@ -468,18 +515,27 @@ def main():
                         help='First sub-cycle phase in mixed profile')
 
     args = parser.parse_args()
+    _validate_args(parser, args)
     random.seed(args.seed)
 
     output_path, plot_path = _next_output_paths()
 
-    print(f"[INFO] Profile={args.profile} | Duration={args.duration}s | "
+    # The mixed profile is sized by its cycle count, so a duration only has to be
+    # supplied for the single-phase profiles, which run for one sub-cycle each
+    duration_s = int(args.charge_duration_mean if args.profile == 'charge'
+                     else args.discharge_duration_mean)
+
+    sizing = (f"Cycles={args.n_cycles}" if args.profile == 'mixed'
+              else f"Duration={duration_s}s")
+    print(f"[INFO] Profile={args.profile} | {sizing} | "
           f"Capacity={args.capacity}Ah | InitialSoC={args.initial_soc}%")
 
     # ---- Simulation (cell behaviour curve generation) ----
 
     records = simulate(
-        args.capacity, args.duration, args.initial_soc,
+        args.capacity, duration_s, args.initial_soc,
         profile_mode=args.profile,
+        n_cycles=args.n_cycles,
         # charge params (charge and mixed)
         I_cc=args.charge_current,
         slew_rate=args.slew_rate,

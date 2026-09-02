@@ -12,8 +12,10 @@
  *
  *   SEEKING_REST : waiting for the first confirmed rest; no integral yet.
  *   AT_REST      : resting; no charge integration.
- *   ACTIVE       : integrating charge (I × dt).  When the next rest is
- *                  confirmed, Qmax and SoH are computed if ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.
+ *   ACTIVE       : integrating charge (I × dt).  When the next rest is confirmed,
+ *                  Qmax and SoH are computed if the window was a charge spanning
+ *                  ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.  Discharge windows are rejected,
+ *                  but still reposition the rest SoC for the next window.
  *
  * The coulombic efficiency is not applied here: the BMS already scales the
  * cell current integral by η before passing it to this estimator.
@@ -105,11 +107,16 @@ Bms_Error_t Soh_Update(Soh_State_t *soh_state,
                 float soc_end_pct = 0.0f;
                 SocOcv_LookupSoc(v_meas_mv, &soc_end_pct);
 
-                float delta_soc = fabsf(soc_end_pct - soh_state->soc_at_rest_entry_pct);
-                
-                /* Check if the change in SoC is significant enough to warrant a SoH update */
+                /* Signed on purpose: a charge window yields ΔSoC > 0, a discharge
+                 * window ΔSoC < 0.  Only charge windows are accepted, charging being
+                 * the controlled and reproducible direction (CC-CV), whereas a
+                 * discharge window reflects whatever load the application drew. */
+                float delta_soc = soc_end_pct - soh_state->soc_at_rest_entry_pct;
+
+                /* The positive threshold therefore rejects discharge windows outright,
+                 * and keeps only charges wide enough to make Qmax accurate */
                 if (delta_soc >= SOH_MIN_DELTA_SOC_PCT) {
-                    float qmax_ah = fabsf(soh_state->charge_integral_ah)
+                    float qmax_ah = soh_state->charge_integral_ah
                                   / (delta_soc / 100.0f);
                     float soh = (qmax_ah / SOH_NOM_CAPACITY_AH) * 100.0f;
 
