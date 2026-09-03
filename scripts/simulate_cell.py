@@ -81,7 +81,11 @@ C1 = 1500.0  # RC capacitance [F]
 
 # ---- Cell Parameters (must match bms_types.h / soc_ekf.c) ----
 # BMS_CELL_CAPACITY_INI_AH = 60.0
-BMS_CELL_CAPACITY_INI_AH = 4.2
+# 3.4 Ah for the UL-PUR dataset. Keep this equal to BMS_CELL_CAPACITY_INI_AH in
+# bms_types.h: the SoH estimator measures Qmax from the simulated current and
+# judges it against the C-side nominal, so a mismatch here reads as capacity
+# fade (or as an impossibly large cell) rather than as the healthy cell simulated.
+BMS_CELL_CAPACITY_INI_AH = 3.4
 
 # ---- OCV Table (0–100%, 5% steps) ----
 OCV_TABLE_MV = [

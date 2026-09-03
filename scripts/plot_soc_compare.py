@@ -63,6 +63,7 @@ class BmsEkfState(ctypes.Structure):
         ('P', (ctypes.c_float * 2) * 2),
         ('Q', (ctypes.c_float * 2) * 2),
         ('R', ctypes.c_float),
+        ('capacity_ah', ctypes.c_float),
     ]
 
 

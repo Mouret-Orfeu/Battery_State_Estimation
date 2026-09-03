@@ -17,6 +17,12 @@
  *                  ΔSoC ≥ SOH_MIN_DELTA_SOC_PCT.  Discharge windows are rejected,
  *                  but still reposition the rest SoC for the next window.
  *
+ * Every accepted Qmax is published twice: as SoH, and as the current capacity
+ * (Soh_GetCapacityAh) that the SoC estimator integrates against instead of the
+ * nominal one.  A window is only accepted once its Qmax has passed the
+ * plausibility band in bms_types.h, which is what keeps one aberrant
+ * measurement from corrupting the SoC estimate along with the SoH one.
+ *
  * The coulombic efficiency is not applied here: the BMS already scales the
  * cell current integral by η before passing it to this estimator.
  *
@@ -68,6 +74,10 @@ Bms_Error_t Soh_Update(Soh_State_t *soh_state,
 {
     if (soh_state == NULL) return BMS_ERR_NOT_INITIALISED;
 
+    /* Reported to the caller only on the step that closes a window; every other
+     * step of the state machine leaves it at BMS_OK */
+    Bms_Error_t status = BMS_OK;
+
     bool at_rest = (fabsf(current_a) < SOH_REST_CURRENT_THRESHOLD_A);
 
     /* Maintain consecutive rest timer */
@@ -118,12 +128,39 @@ Bms_Error_t Soh_Update(Soh_State_t *soh_state,
                 if (delta_soc >= SOH_MIN_DELTA_SOC_PCT) {
                     float qmax_ah = soh_state->charge_integral_ah
                                   / (delta_soc / 100.0f);
-                    float soh = (qmax_ah / SOH_NOM_CAPACITY_AH) * 100.0f;
 
-                    soh_state->qmax_ah           = qmax_ah;
-                    soh_state->soh_pct           = _clampf(soh, 0.0f, 100.0f);
-                    soh_state->soh_update_time_s = t_s;
-                    soh_state->soh_update_count++;
+                    /* Fraction of the nominal capacity the cell still holds —
+                     * the SoH ratio, and what the plausibility band is set on */
+                    float capacity_ratio = qmax_ah / SOH_NOM_CAPACITY_AH;
+
+                    /* Written as "inside the band" rather than negated, so that a
+                     * non-finite ratio — every comparison against a NaN being
+                     * false — falls to the reject branch instead of through it */
+                    bool is_plausible = (capacity_ratio >= BMS_CAPACITY_RATIO_MIN)
+                                     && (capacity_ratio <= BMS_CAPACITY_RATIO_MAX);
+
+                    if (is_plausible) {
+                        /* Published for both consumers: soh_pct for the SoH
+                         * output, qmax_ah for the SoC estimator to integrate
+                         * against.  soh_pct is clamped because the band tolerates
+                         * a slightly-above-nominal measurement on a fresh cell,
+                         * which is a sane capacity but not a sane SoH to report. */
+                        soh_state->qmax_ah           = qmax_ah;
+                        soh_state->soh_pct           = _clampf(capacity_ratio * 100.0f,
+                                                               0.0f, 100.0f);
+                        soh_state->soh_update_time_s = t_s;
+                        soh_state->soh_update_count++;
+
+                        /* Worn past end of life: the estimate stands and still
+                         * feeds SoC, the caller is simply told the cell is spent */
+                        if (capacity_ratio < BMS_CAPACITY_RATIO_EOL) {
+                            status = BMS_ERR_CAPACITY_EOL;
+                        }
+                    } else {
+                        /* Discarded: a single aberrant window must not be able to
+                         * corrupt SoH, nor SoC through the capacity it exports */
+                        status = BMS_ERR_CAPACITY_IMPLAUSIBLE;
+                    }
                 }
 
                 /* Record new rest SoC regardless of whether update was valid */
@@ -140,13 +177,19 @@ Bms_Error_t Soh_Update(Soh_State_t *soh_state,
             break;
     }
 
-    return BMS_OK;
+    return status;
 }
 
 float Soh_Get(const Soh_State_t *soh_state)
 {
     if (soh_state == NULL || soh_state->soh_update_count == 0U) return -1.0f;
     return soh_state->soh_pct;
+}
+
+float Soh_GetCapacityAh(const Soh_State_t *soh_state)
+{
+    if (soh_state == NULL || soh_state->soh_update_count == 0U) return -1.0f;
+    return soh_state->qmax_ah;
 }
 
 

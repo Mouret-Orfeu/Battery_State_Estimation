@@ -45,7 +45,14 @@
  *  rejected because charging is the reproducible direction (CC-CV). */
 #define SOH_MIN_DELTA_SOC_PCT           80.0f
 
-/** Nominal capacity used as SoH reference (mirrors bms_types.h) [Ah] */
+/** Nominal capacity used as SoH reference (mirrors bms_types.h) [Ah].
+ *
+ *  This is the *fixed* capacity of the cell when new, and nothing else: it is
+ *  the denominator of the SoH ratio and must never be reassigned to a measured
+ *  value, or SoH would compare the cell against itself and read 100 % forever.
+ *  The *current* measured capacity is a runtime quantity, held per estimator
+ *  instance in Soh_State_t.qmax_ah and published by Soh_GetCapacityAh(); that
+ *  is the one the SoC estimator integrates against. */
 #define SOH_NOM_CAPACITY_AH             BMS_CELL_CAPACITY_INI_AH
 
 /* =========================================================
@@ -89,7 +96,14 @@ void Soh_Init(Soh_State_t *s);
  * @param  v_meas_mv   Terminal voltage [mV] (used for OCV SoC lookup at rest)
  * @param  t_s         Timestamp of this sample to be processed [s]
  * @param  dt_s        Time step duration [s]
- * @return BMS_OK, or BMS_ERR_NOT_INITIALISED if s == NULL
+ * @return BMS_OK,
+ *         BMS_ERR_NOT_INITIALISED if s == NULL, or — on the single step where a
+ *         closing window produces a Qmax:
+ *         BMS_ERR_CAPACITY_IMPLAUSIBLE, the measurement fell outside
+ *             [BMS_CAPACITY_RATIO_MIN, BMS_CAPACITY_RATIO_MAX] × nominal and was
+ *             discarded, previous SoH and capacity kept; or
+ *         BMS_ERR_CAPACITY_EOL, the measurement was accepted and published but
+ *             puts the cell below BMS_CAPACITY_RATIO_EOL × nominal
  */
 Bms_Error_t Soh_Update(Soh_State_t *s,
                         float        current_a,
@@ -102,6 +116,20 @@ Bms_Error_t Soh_Update(Soh_State_t *s,
  * @return SoH percentage, or -1.0f if no valid estimate has been produced yet.
  */
 float Soh_Get(const Soh_State_t *s);
+
+/**
+ * @brief  Return the latest *measured* maximum capacity of the cell [Ah].
+ *
+ *         This is the quantity the SoC estimator must integrate against, fed to
+ *         it through SocEkf_SetCapacityAh().  Only values that passed the
+ *         plausibility band in Soh_Update() are ever published here, so a
+ *         single aberrant window cannot reach the SoC path.
+ *
+ * @return Measured Qmax [Ah], or -1.0f if no valid estimate has been produced
+ *         yet — in which case the SoC estimator keeps the nominal capacity it
+ *         was initialised with.
+ */
+float Soh_GetCapacityAh(const Soh_State_t *s);
 
 /**
  * @brief  Batch convenience: scan a full time-series and collect all SoH

@@ -42,4 +42,26 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
                            float v_meas_mv,
                            float dt_s);
 
+/**
+ * @brief  Refresh the capacity the prediction step integrates the current
+ *         against, so SoC follows the cell as it ages.
+ *
+ *         Meant to be called by the BMS with Soh_GetCapacityAh() whenever the
+ *         SoH estimator publishes a new measurement; until then the filter runs
+ *         on the nominal capacity set by SocEkf_Init().  The value is
+ *         re-checked here rather than trusted: the SoC path must not be
+ *         corrupted by whatever the capacity source happens to hand it.
+ *
+ * @param  ekf          EKF internal state
+ * @param  capacity_ah  Measured current maximum capacity [Ah]
+ * @return BMS_OK on acceptance;
+ *         BMS_ERR_CAPACITY_EOL if accepted but the cell is worn past
+ *             BMS_CAPACITY_RATIO_EOL — the capacity IS applied, since a worn
+ *             cell is exactly where the nominal one estimates SoC worst;
+ *         BMS_ERR_CAPACITY_IMPLAUSIBLE if outside the plausibility band, in
+ *             which case the previous capacity is kept;
+ *         BMS_ERR_NOT_INITIALISED if ekf is NULL
+ */
+Bms_Error_t SocEkf_SetCapacityAh(Bms_EkfState_t *ekf, float capacity_ah);
+
 #endif /* SOC_EKF_H */

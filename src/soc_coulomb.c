@@ -32,7 +32,10 @@ Bms_Error_t SocCoulomb_Update(Bms_SocState_t *state,
     if (state == NULL) return BMS_ERR_NOT_INITIALISED;
     if (!state->is_initialised) return BMS_ERR_NOT_INITIALISED;
 
-    /* Coulomb Counting integration — current_a is already η-corrected upstream */
+    /* Coulomb Counting integration — current_a is already η-corrected upstream.
+     * Deliberately still on the nominal capacity: unlike the EKF, this module is
+     * a comparison baseline rather than a deployed estimator, and its job is to
+     * show the drift of raw integration, capacity fade included. */
     float delta_soc = (current_a * dt_s) /
                       (3600.0f * BMS_CELL_CAPACITY_INI_AH) * 100.0f;
 

@@ -4,11 +4,16 @@
  *          State: x = [SoC, V_RC]  (1st order ECM / Randles model)
  *
  * State-space (discrete):
- *   SoC(k)  = SoC(k-1)  + [I(k) × Δt] / [3600 × Q_nom]       (positive I = charge)
+ *   SoC(k)  = SoC(k-1)  + [I(k) × Δt] / [3600 × Q_cur]       (positive I = charge)
  *   V_RC(k) = exp(−Δt/(R1×C1)) × V_RC(k-1) + R1×(1−exp(−Δt/(R1×C1))) × I(k)
  *
  * Measurement equation (terminal voltage):
  *   y(k) = OCV(SoC(k)) + V_RC(k) + R0 × I(k)
+ *
+ * Q_cur is the capacity the cell holds *now*, not the one it held when new:
+ * SocEkf_SetCapacityAh() takes the measured Qmax published by the SoH estimator
+ * so the prediction step follows capacity fade instead of assuming it away.
+ * The nominal capacity remains the SoH reference and the startup fallback only.
  *
  * The coulombic efficiency is not applied here: the BMS already scales the
  * cell current integral by η before passing it to this estimator.
@@ -60,8 +65,38 @@ void SocEkf_Init(Bms_EkfState_t    *ekf,
     /* Measurement noise */
     ekf->R = EKF_R;
 
+    /* No SoH measurement exists at startup, so the filter begins on the nominal
+     * capacity and switches to the measured one on the first
+     * SocEkf_SetCapacityAh() call the BMS makes after a SoH update */
+    ekf->capacity_ah = BMS_CELL_CAPACITY_INI_AH;
+
     state->soc_pct        = initial_soc_pct;
     state->is_initialised = true;
+}
+
+Bms_Error_t SocEkf_SetCapacityAh(Bms_EkfState_t *ekf, float capacity_ah)
+{
+    if (!ekf) return BMS_ERR_NOT_INITIALISED;
+
+    float capacity_ratio = capacity_ah / BMS_CELL_CAPACITY_INI_AH;
+
+    /* Tested for being inside the band rather than outside it, so a non-finite
+     * ratio — every comparison against a NaN being false — is rejected too */
+    bool is_plausible = (capacity_ratio >= BMS_CAPACITY_RATIO_MIN)
+                     && (capacity_ratio <= BMS_CAPACITY_RATIO_MAX);
+
+    if (!is_plausible) {
+        /* Previous capacity left in place: running on a slightly stale capacity
+         * costs far less accuracy than integrating against a wrong one */
+        return BMS_ERR_CAPACITY_IMPLAUSIBLE;
+    }
+
+    ekf->capacity_ah = capacity_ah;
+
+    /* Applied, but worth reporting: the cell is past its service life */
+    if (capacity_ratio < BMS_CAPACITY_RATIO_EOL) return BMS_ERR_CAPACITY_EOL;
+
+    return BMS_OK;
 }
 
 Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
@@ -74,13 +109,22 @@ Bms_Error_t SocEkf_Update(Bms_EkfState_t *ekf,
 
     float I  = current_a;
     float dt = dt_s;
-    float Q_nom = BMS_CELL_CAPACITY_INI_AH;
+
+    /* Capacity the charge is counted against: the latest plausible measurement
+     * from the SoH estimator, or the nominal one while none exists yet.  Using
+     * the nominal value on an aged cell would make every Ah integrated count
+     * for too little SoC, so the estimate would drift low over the cell's life. */
+    float Q_current = ekf->capacity_ah;
+
+    /* A state that never went through SocEkf_Init() holds a zero capacity, which
+     * would turn B1 into a division by zero and poison every later step */
+    if (!(Q_current > 0.0f)) Q_current = BMS_CELL_CAPACITY_INI_AH;
 
     /* ECM time constant */
     float tau   = s_ecm.R1 * s_ecm.C1;
     float A11   = 1.0f;
     float A22   = expf(-dt / tau);
-    float B1    = dt / (3600.0f * Q_nom);   /* current is already η-corrected */
+    float B1    = dt / (3600.0f * Q_current);   /* current is already η-corrected */
     float B2    = s_ecm.R1 * (1.0f - A22);
 
     /* ---- 1. Prediction Step ---- */
