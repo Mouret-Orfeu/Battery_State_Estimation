@@ -71,7 +71,7 @@ typedef struct {
     float   soc_pct;            /* Current SoC estimate [0.0 – 100.0] */
     float   soc_prev_pct;       /* Previous cycle SoC                  */
     float   v_terminal_mv;      /* Measured terminal voltage [mV]      */
-    float   current_a;          /* Measured current [A] (+ve = charge) */
+    float   current_a;          /* Measured current [A] (positive = charging) */
     float   temperature_degc;   /* Cell temperature [°C]               */
     bool    is_initialised;     /* SoC has been bootstrapped           */
 } Bms_SocState_t;

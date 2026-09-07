@@ -14,6 +14,11 @@ requested sub-cycles and rests add up to, so no sub-cycle is ever cut short.
 The single-phase profiles run for one sub-cycle, sized by --charge-duration-mean
 or --discharge-duration-mean respectively.
 
+The profile is generated, simulated and written as a stream: samples are produced
+one at a time and appended to the CSV in chunks of --chunk-rows, so peak memory
+stays bounded no matter how long the run is. Sample count scales as 1/--dt, so
+runs of thousands of cycles reach tens of millions of rows.
+
 Output is always saved to docs/simulated_cell_behavior/simulated_cell_behavior_i.csv,
 where i follows the highest existing index in that folder.
 
@@ -29,6 +34,7 @@ import csv
 import random
 import re
 import pathlib
+from collections.abc import Iterator
 import matplotlib.pyplot as plt
 
 _BASE_DIR  = pathlib.Path(__file__).resolve().parent.parent / "docs" / "simulated_cell_behavior"
@@ -51,8 +57,21 @@ def _next_output_paths() -> tuple[pathlib.Path, pathlib.Path]:
 
 # ---- Simulation parameters ----
 
+# Sampling period, matching the integration step the C estimators run at
+DEFAULT_DT_S = 0.4
+
+# Records buffered before each flush to CSV. Only this many are ever resident, so
+# it trades RAM against write syscalls rather than capping the total run length
+DEFAULT_CHUNK_ROWS = 100_000
+
+# Upper bound on samples retained for the plot. A multi-thousand-cycle run holds
+# far more rows than a figure can resolve, so the curve is decimated on the fly
+DEFAULT_PLOT_MAX_POINTS = 100_000
+
 # Shortest sub-cycle generate_mixed_cycles emits; shorter draws are clamped up to it
 MIN_SUB_DURATION_S = 10
+
+CSV_FIELDNAMES = ['time_s', 'current_a', 'voltage_mv', 'true_soc_pct']
 
 # Max per-step change in current during discharge and charge
 DISCHARGE_MAX_SLEW = 5.0  
@@ -123,7 +142,7 @@ def _apply_slew(current: float, target: float, max_delta: float) -> float:
 # As I don't want regen behavior in my case, I put regen weight to 0 here
 def generate_discharge_cycle(
     duration_s: int,
-    dt: float = 0.4,
+    dt: float = DEFAULT_DT_S,
     discharge_slew_rate: float = DISCHARGE_MAX_SLEW,
     state_duration_min_s: float = 30.0,
     state_duration_max_s: float = 300.0,
@@ -137,16 +156,18 @@ def generate_discharge_cycle(
     decelerate_current_max: float = -5.0,
     regen_current_min: float = 10.0,
     regen_current_max: float = 40.0,
-) -> list:
+) -> Iterator[tuple[float, float]]:
     """
     Generate a synthetic WLTP-inspired current profile.
     Positive = charge (regen), Negative = discharge (driving).
+
+    Yields (time_s, current_a) one sample at a time so a long profile never has to
+    exist in memory all at once.
     """
     if discharge_state_weights is None:
         discharge_state_weights = DISCHARGE_STATE_WEIGHTS
 
     steps = int(duration_s / dt)
-    profile = []
     t = 0.0
 
     state = 'cruise'
@@ -180,36 +201,35 @@ def generate_discharge_cycle(
             target_current = idle_current
 
         current = _apply_slew(current, target_current, max_slew)
-        profile.append((round(t, 2), round(current, 2)))
+        yield (round(t, 2), round(current, 2))
         t += dt
-
-    return profile
 
 
 def generate_charge_cycle(
     duration_s: int,
-    dt: float = 0.4,
+    dt: float = DEFAULT_DT_S,
     I_cc: float = 30.0,
     slew_rate: float = 5.0,
-) -> list:
-    """Generate a constant-current charging profile (positive current = charge)."""
+) -> Iterator[tuple[float, float]]:
+    """
+    Generate a constant-current charging profile (positive current = charge).
+
+    Yields (time_s, current_a) one sample at a time.
+    """
     steps    = int(duration_s / dt)
-    profile  = []
     t        = 0.0
     current  = 0.0
     max_slew = slew_rate * dt
 
     for _ in range(steps):
         current = _apply_slew(current, I_cc, max_slew)
-        profile.append((round(t, 2), round(current, 2)))
+        yield (round(t, 2), round(current, 2))
         t += dt
-
-    return profile
 
 
 def generate_mixed_cycles(
     n_cycles: int,
-    dt: float = 0.4,
+    dt: float = DEFAULT_DT_S,
     # Charge sub-cycle parameters (shared across all charge cycles)
     I_cc: float = 30.0,
     slew_rate: float = 5.0,
@@ -234,9 +254,13 @@ def generate_mixed_cycles(
     first_phase: str = DEFAULT_MIXED_FIRST_PHASE,
     # Discharge cycle distribution parameters (forwarded to generate_discharge_cycle)
     **discharge_kwargs,
-) -> list:
+) -> Iterator[tuple[float, float]]:
     """
     Concatenate n_cycles charge/discharge pairs separated by rest periods.
+
+    Yields (time_s, current_a) one sample at a time: sub-cycles are consumed
+    lazily and shifted onto the running time offset as they are produced, so a
+    5000-cycle profile costs the same memory as a 5-cycle one.
 
     Every sub-cycle runs to its full drawn length: the profile is built from a
     cycle count rather than a time budget, so no sub-cycle is ever truncated and
@@ -255,7 +279,6 @@ def generate_mixed_cycles(
         'b': (rest_duration_mean_s_b, rest_duration_std_s_b),
     }
     pattern = rest_duration_pattern or ['a']
-    profile = []
     t_offset = 0.0
     phase = first_phase
     rest_count = 0
@@ -279,7 +302,7 @@ def generate_mixed_cycles(
             )
 
         for t_s, i_a in sub_cycle:
-            profile.append((round(t_offset + t_s, 2), i_a))
+            yield (round(t_offset + t_s, 2), i_a)
 
         t_offset += duration_s
         completed_phase = phase
@@ -299,25 +322,33 @@ def generate_mixed_cycles(
             rest_count       += 1
 
             for i in range(rest_steps):
-                profile.append((round(t_offset + i * dt, 2), 0.0))
+                yield (round(t_offset + i * dt, 2), 0.0)
             t_offset += rest_steps * dt
-
-    return profile
 
 
 # ---- ECM simulation to get current corresponding voltage and SoC ----
 
 def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
-             dt: float = 0.4, noise_sigma_mv: float = 5.0,
+             dt: float = DEFAULT_DT_S, noise_sigma_mv: float = 5.0,
              profile_mode: str = 'discharge', n_cycles: int = DEFAULT_MIXED_CYCLES,
-             **charge_kwargs):
+             seed: int = 42, **charge_kwargs) -> Iterator[dict]:
     """
-    Run full ECM simulation and return list of records.
+    Run full ECM simulation, yielding one record per sample.
+
+    Consumes the current profile lazily and yields each record as it is computed,
+    so the caller can write results away and never hold the whole run in memory.
+
+    Measurement noise is drawn from a private generator rather than the global one
+    the profile generators use. Lazy generation interleaves profile draws with
+    noise draws, and a single shared stream would make the current profile depend
+    on how many noise samples had been consumed so far, so a given seed would no
+    longer reproduce the sub-cycle durations it used to.
 
     duration_s sizes the single-phase profiles ('discharge' and 'charge'), while
     the mixed profile is sized by n_cycles instead and runs for however long its
     sub-cycles and rests take.
     """
+    noise_rng = random.Random(f"{seed}-measurement-noise")
     _MIXED_KEYS = {
         'discharge_duration_mean_s', 'discharge_duration_std_s',
         'charge_duration_mean_s', 'charge_duration_std_s',
@@ -348,7 +379,6 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
     v_rc  = 0.0
     tau   = R1 * C1
     alpha = math.exp(-dt / tau)
-    records = []
 
     for t_s, current_a in profile:
         # SoC update (Coulomb Counting — ground truth)
@@ -362,14 +392,14 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
         # Terminal voltage (mV) with Gaussian noise
         ocv_mv       = ocv_from_soc(soc)
         v_terminal_mv = ocv_mv + v_rc * 1000.0 + R0 * current_a * 1000.0
-        v_terminal_mv += random.gauss(0.0, noise_sigma_mv)
+        v_terminal_mv += noise_rng.gauss(0.0, noise_sigma_mv)
 
-        records.append({
+        yield {
             'time_s':       t_s,
             'current_a':    round(current_a, 3),
             'voltage_mv':   round(v_terminal_mv, 2),
             'true_soc_pct': round(soc, 4)
-        })
+        }
 
         if profile_mode == 'discharge' and soc <= 0.5:
             print(f"[INFO] Battery depleted at t={t_s:.1f}s — stopping simulation.")
@@ -377,8 +407,6 @@ def simulate(capacity_ah: float, duration_s: int, initial_soc: float = 90.0,
         elif profile_mode == 'charge' and soc >= 99.5:
             print(f"[INFO] Battery fully charged at t={t_s:.1f}s — stopping simulation.")
             break
-
-    return records
 
 
 def _validate_args(parser, args):
@@ -397,6 +425,20 @@ def _validate_args(parser, args):
 
     if args.profile == 'mixed' and args.n_cycles < 1:
         parser.error(f'--n-cycles must be >= 1, got {args.n_cycles}')
+
+    if args.dt <= 0.0:
+        parser.error(f'--dt must be > 0, got {args.dt}')
+
+    # A sub-cycle shorter than one sampling period would emit no samples at all
+    if args.dt > MIN_SUB_DURATION_S:
+        parser.error(f'--dt must be <= {MIN_SUB_DURATION_S} s, the shortest sub-cycle '
+                     f'the generator emits, got {args.dt}')
+
+    if args.chunk_rows < 1:
+        parser.error(f'--chunk-rows must be >= 1, got {args.chunk_rows}')
+
+    if args.plot_max_points < 1:
+        parser.error(f'--plot-max-points must be >= 1, got {args.plot_max_points}')
 
     # Sub-cycle means below the floor would be raised to it without notice
     for name, value in (('--charge-duration-mean',    args.charge_duration_mean),
@@ -435,6 +477,13 @@ def main():
                              'duration follows from this and the sub-cycle/rest durations')
     parser.add_argument('--initial-soc', type=float, default=0.0,
                         help='Initial SoC [%%]')
+    parser.add_argument('--dt',          type=float, default=DEFAULT_DT_S,
+                        help='Sampling period [s]; sample count scales as 1/dt')
+    parser.add_argument('--chunk-rows',  type=int,   default=DEFAULT_CHUNK_ROWS,
+                        help='Records buffered in RAM before each flush to the CSV')
+    parser.add_argument('--plot-max-points', type=int, default=DEFAULT_PLOT_MAX_POINTS,
+                        help='Max samples kept for the plot; the curve is decimated '
+                             'on the fly past this, while the CSV keeps every sample')
     parser.add_argument('--seed',        type=int,   default=42,
                         help='Random seed for reproducibility')
     parser.add_argument('--profile',     type=str,   default='mixed',
@@ -538,8 +587,10 @@ def main():
 
     records = simulate(
         args.capacity, duration_s, args.initial_soc,
+        dt=args.dt,
         profile_mode=args.profile,
         n_cycles=args.n_cycles,
+        seed=args.seed,
         # charge params (charge and mixed)
         I_cc=args.charge_current,
         slew_rate=args.slew_rate,
@@ -574,13 +625,59 @@ def main():
 
     # ---- Output CSV generation ----
 
-    with open(output_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['time_s', 'current_a', 'voltage_mv', 'true_soc_pct'])
-        writer.writeheader()
-        writer.writerows(records)
+    # The records generator is consumed once, here: each record is buffered, flushed
+    # to disk in chunks and then dropped, so only chunk_rows records plus the
+    # decimated plot arrays stay resident. Run length is bounded by disk, not RAM.
+    chunk       = []
+    total_rows  = 0
+    last_record = None
 
-    print(f"[INFO] Written {len(records)} samples → {output_path}")
-    final_soc = records[-1]['true_soc_pct']
+    # Plot decimation state — see the adaptive halving below
+    plot_stride = 1
+    plot_time, plot_current, plot_voltage, plot_soc = [], [], [], []
+
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
+        writer.writeheader()
+
+        for sample_index, record in enumerate(records):
+            chunk.append(record)
+            if len(chunk) >= args.chunk_rows:
+                writer.writerows(chunk)
+                total_rows += len(chunk)
+                chunk.clear()
+
+            # Keep every plot_stride-th sample; once the kept set outgrows twice the
+            # budget, drop every other one and double the stride. Bounds the plot
+            # arrays without needing the total sample count up front, which the
+            # generator cannot supply, and keeps the retained samples evenly spaced.
+            if sample_index % plot_stride == 0:
+                plot_time.append(record['time_s'] / 60.0)  # minutes for plotting
+                plot_current.append(record['current_a'])
+                plot_voltage.append(record['voltage_mv'])
+                plot_soc.append(record['true_soc_pct'])
+
+                if len(plot_time) >= 2 * args.plot_max_points:
+                    del plot_time[1::2]
+                    del plot_current[1::2]
+                    del plot_voltage[1::2]
+                    del plot_soc[1::2]
+                    plot_stride *= 2
+
+            last_record = record
+
+        # Trailing partial chunk
+        if chunk:
+            writer.writerows(chunk)
+            total_rows += len(chunk)
+            chunk.clear()
+
+    print(f"[INFO] Written {total_rows} samples → {output_path}")
+    if plot_stride > 1:
+        print(f"[INFO] Plot decimated to {len(plot_time)} points "
+              f"(every {plot_stride}th sample); the CSV keeps every sample.")
+
+    final_soc = last_record['true_soc_pct']
     delta_soc = final_soc - args.initial_soc
     sign      = '+' if delta_soc >= 0 else ''
     print(f"[INFO] Final SoC: {final_soc:.2f}%  |  "
@@ -589,24 +686,21 @@ def main():
 
     # ---- Plot ----
 
-    time     = [r['time_s'] / 60.0 for r in records] # Convert time to minutes for plotting
-    current  = [r['current_a']    for r in records]
-    voltage  = [r['voltage_mv']   for r in records]
-    soc_hist = [r['true_soc_pct'] for r in records]
+    # Series were accumulated during the write loop above, already decimated
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
     fig.suptitle(f"Simulated cell behaviour — {output_path.stem}", fontsize=11)
 
-    axes[0].plot(time, current, linewidth=0.8)
+    axes[0].plot(plot_time, plot_current, linewidth=0.8)
     axes[0].set_ylabel("Current (A)")
     axes[0].axhline(0, color='k', linewidth=0.4, linestyle='--')
     axes[0].grid(True, linewidth=0.3)
 
-    axes[1].plot(time, voltage, color='tab:orange', linewidth=0.8)
+    axes[1].plot(plot_time, plot_voltage, color='tab:orange', linewidth=0.8)
     axes[1].set_ylabel("Voltage (mV)")
     axes[1].grid(True, linewidth=0.3)
 
-    axes[2].plot(time, soc_hist, color='tab:green', linewidth=0.8)
+    axes[2].plot(plot_time, plot_soc, color='tab:green', linewidth=0.8)
     axes[2].set_ylabel("True SoC (%)")
     axes[2].set_xlabel("Time (min)")
     axes[2].grid(True, linewidth=0.3)

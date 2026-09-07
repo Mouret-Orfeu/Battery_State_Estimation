@@ -27,3 +27,4 @@ docs/simulated_cell_behavior/csv
 
 # IA assistant context file
 CLAUDE.md
+To tell claude about your code.txt
